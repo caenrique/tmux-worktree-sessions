@@ -12,8 +12,9 @@ _strip_prefixes=$(_get @tmux-sessions-strip-prefixes)
 _manual_sessions=$(_get @tmux-sessions-manual-sessions)
 _max_depth=$(_get @tmux-sessions-max-depth);         _max_depth=${_max_depth:-6}
 _default_branch=$(_get @tmux-sessions-default-branch); _default_branch=${_default_branch:-main}
-_half_life=$(_get @tmux-sessions-score-half-life);  _half_life=${_half_life:-7}
-_icon_style=$(_get @tmux-sessions-icon-style);      _icon_style=${_icon_style:-nerd}
+_half_life=$(_get @tmux-sessions-score-half-life);  _half_life=${_half_life:-14}
+_path_boost=$(_get @tmux-sessions-score-path-boost); _path_boost=${_path_boost:-1.0}
+_icon_style=$(_get @tmux-sessions-icon-style);       _icon_style=${_icon_style:-nerd}
 
 # Expand literal $HOME that tmux does not expand in option values.
 _projects_dirs="${_projects_dirs//\$HOME/$HOME}"
@@ -30,5 +31,6 @@ tmux bind-key -n "$_key" run-shell -b "\
   TMUX_SESSIONS_MAX_DEPTH='$_max_depth' \
   TMUX_SESSIONS_DEFAULT_BRANCH='$_default_branch' \
   TMUX_SESSIONS_SCORE_HALF_LIFE='$_half_life' \
+  TMUX_SESSIONS_SCORE_PATH_BOOST='$_path_boost' \
   TMUX_SESSIONS_ICON_STYLE='$_icon_style' \
   '$PLUGIN_DIR/scripts/sessions.sh'"

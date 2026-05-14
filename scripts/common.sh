@@ -128,7 +128,7 @@ update_score() {
   local session_name="$1"
   local now half_life
   now=$(date +%s)
-  half_life=$(( ${TMUX_SESSIONS_SCORE_HALF_LIFE:-7} * 24 * 3600 ))
+  half_life=$(( ${TMUX_SESSIONS_SCORE_HALF_LIFE:-14} * 24 * 3600 ))
 
   mkdir -p "$(dirname "$SCORE_FILE")"
   [[ -f "$SCORE_FILE" ]] || touch "$SCORE_FILE"
@@ -162,11 +162,14 @@ sort_by_score() {
   local boost_path="${1:-}"
   local now half_life
   now=$(date +%s)
-  half_life=$(( ${TMUX_SESSIONS_SCORE_HALF_LIFE:-7} * 24 * 3600 ))
+  half_life=$(( ${TMUX_SESSIONS_SCORE_HALF_LIFE:-14} * 24 * 3600 ))
+
+  local path_boost
+  path_boost=${TMUX_SESSIONS_SCORE_PATH_BOOST:-1.0}
 
   awk -F'\t' \
       -v score_file="$SCORE_FILE" -v now="$now" -v hl="$half_life" \
-      -v boost_path="$boost_path" '
+      -v boost_path="$boost_path" -v path_boost="$path_boost" '
     BEGIN {
       while ((getline line < score_file) > 0) {
         n = split(line, f, "\t")
@@ -186,7 +189,7 @@ sort_by_score() {
           if (substr($3, i, 1) == substr(boost_path, i, 1)) cpl++
           else break
         }
-        score += cpl / 300.0
+        score += (cpl / 120.0) * path_boost
       }
       printf "%020.6f\t%s\n", score, $0
     }

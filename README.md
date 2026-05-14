@@ -52,7 +52,8 @@ All options are set in `tmux.conf` with `set -g @option value`. Every option has
 | `@tmux-sessions-scores-file` | `$HOME/.local/share/tmux-sessions/scores.tsv` | Path to the recency score database |
 | `@tmux-sessions-max-depth` | `6` | How many directory levels deep to search for git repos |
 | `@tmux-sessions-default-branch` | `main` | Fallback branch name when the remote default can't be determined |
-| `@tmux-sessions-score-half-life` | `7` | Days until a session's recency score decays to half its value |
+| `@tmux-sessions-score-half-life` | `14` | Days until a session's recency score decays to half its value |
+| `@tmux-sessions-score-path-boost` | `1.0` | Multiplier for the path-similarity boost. Higher values make entries in the same repository rank above entries from other repos that were picked more recently. `0` disables the boost entirely |
 | `@tmux-sessions-icon-style` | `nerd` | Icon set for the picker: `nerd` (default, requires a Nerd Font — included out of the box in Ghostty and WezTerm), `emoji`, `ascii` (`* . - @ +`), or `none` (no icons) |
 
 ### Example configuration
@@ -124,7 +125,9 @@ When you create a worktree via `Ctrl-W`, the new directory is placed as a siblin
 
 ## Recency ranking
 
-The picker ranks entries by how recently and frequently you've opened them. Each time you switch to a session, its score increases by 1. Scores decay with a configurable half-life (default: 7 days), so sessions you haven't touched in a while gradually sink below more active ones. Entries in the same repository get a small boost relative to your current working directory.
+The picker ranks entries by how recently and frequently you've opened them. Each time you switch to a session, its score increases by 1. Scores decay with a configurable half-life (default: 14 days), so sessions you haven't touched in a while gradually sink below more active ones.
+
+Entries whose path shares a longer prefix with your current working directory also get a boost (configurable via `@tmux-sessions-score-path-boost`, default `1.0`). At the default values, a same-repo worktree picked at least once in the last month will rank above an unrelated project picked last week, while a project you've picked multiple times this week always stays at the top.
 
 ## See also
 
