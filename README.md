@@ -13,11 +13,11 @@ Selecting an entry switches to the session (or creates one if the project isn't 
 
 ## Requirements
 
-- tmux ≥ 3.2
-- git
+- [tmux](https://github.com/tmux/tmux) ≥ 3.2
+- [git](https://git-scm.com)
 - [fzf](https://github.com/junegunn/fzf)
 - [fd](https://github.com/sharkdp/fd) *(optional — falls back to `find` if not installed)*
-- curl *(for the live fetch-and-reload animation in the branch picker)*
+- [curl](https://curl.se) *(for the live fetch-and-reload animation in the branch picker)*
 
 ## Installation
 
