@@ -43,18 +43,18 @@ run-shell '/path/to/tmux-sessions/tmux-sessions.tmux'
 
 All options are set in `tmux.conf` with `set -g @option value`. Every option has a sensible default — you only need to set the ones you want to change.
 
-| Option | Default | Description |
-|---|---|---|
-| `@tmux-sessions-key` | `C-S-s` | Key binding to open the session picker |
-| `@tmux-sessions-projects-dir` | `$HOME/Projects` | Space-separated list of root directories to scan for git repos |
-| `@tmux-sessions-strip-prefixes` | *(none)* | Space-separated path prefixes to strip from display names |
-| `@tmux-sessions-manual-sessions` | *(none)* | Always-visible entries as space-separated `name:path` pairs |
-| `@tmux-sessions-scores-file` | `$HOME/.local/share/tmux-sessions/scores.tsv` | Path to the recency score database |
-| `@tmux-sessions-max-depth` | `6` | How many directory levels deep to search for git repos |
-| `@tmux-sessions-default-branch` | `main` | Fallback branch name when the remote default can't be determined |
-| `@tmux-sessions-score-half-life` | `14` | Days until a session's recency score decays to half its value |
-| `@tmux-sessions-score-path-boost` | `1.0` | Multiplier for the path-similarity boost. Higher values make entries in the same repository rank above entries from other repos that were picked more recently. `0` disables the boost entirely |
-| `@tmux-sessions-icon-style` | `nerd` | Icon set for the picker: `nerd` (default, requires a Nerd Font — included out of the box in Ghostty and WezTerm), `emoji`, `ascii` (`* . - @ +`), or `none` (no icons) |
+| Option | Default — Description |
+|---|---|
+| `@tmux-sessions-key` | `C-S-s` — Key binding to open the session picker |
+| `@tmux-sessions-projects-dir` | `$HOME/Projects` — Space-separated list of root directories to scan for git repos |
+| `@tmux-sessions-strip-prefixes` | *(none)* — Space-separated path prefixes to strip from display names |
+| `@tmux-sessions-manual-sessions` | *(none)* — Always-visible entries as space-separated `name:path` pairs |
+| `@tmux-sessions-scores-file` | `$HOME/.local/share/tmux-sessions/scores.tsv` — Path to the recency score database |
+| `@tmux-sessions-max-depth` | `6` — How many directory levels deep to search for git repos |
+| `@tmux-sessions-default-branch` | `main` — Fallback branch name when the remote default can't be determined |
+| `@tmux-sessions-score-half-life` | `14` — Days until a session's recency score decays to half its value |
+| `@tmux-sessions-score-path-boost` | `1.0` — Multiplier for the path-similarity boost; `0` disables it entirely |
+| `@tmux-sessions-icon-style` | `nerd` — Icon set: `nerd` (requires a Nerd Font), `emoji`, `ascii`, or `none` |
 
 ### Example configuration
 
