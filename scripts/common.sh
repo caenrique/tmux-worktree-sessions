@@ -44,6 +44,10 @@ _ICON_SEP="${_ICON_SESSION:+ }"
 # TSV file storing per-session pick scores for recency ranking.
 SCORE_FILE="${TMUX_SESSIONS_SCORES_FILE:-$HOME/.local/share/tmux-sessions/scores.tsv}"
 
+# Absolute path to this script's directory so helpers (sort_by_score.py) are
+# locatable regardless of how common.sh was sourced.
+_PLUGIN_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # ── String utilities ──────────────────────────────────────────────────────────
 
 # Strip ANSI colour escape sequences from a string.
@@ -164,41 +168,10 @@ update_score() {
 #   boost_path get an additive score boost, so same-repo worktrees outrank
 #   same-org projects.
 sort_by_score() {
-  local boost_path="${1:-}"
-  local now half_life
-  now=$(date +%s)
-  half_life=$(( ${TMUX_SESSIONS_SCORE_HALF_LIFE:-14} * 24 * 3600 ))
-
-  local path_boost
-  path_boost=${TMUX_SESSIONS_SCORE_PATH_BOOST:-1.0}
-
-  awk -F'\t' \
-      -v score_file="$SCORE_FILE" -v now="$now" -v hl="$half_life" \
-      -v boost_path="$boost_path" -v path_boost="$path_boost" '
-    BEGIN {
-      while ((getline line < score_file) > 0) {
-        n = split(line, f, "\t")
-        if (n >= 3 && f[1] != "") {
-          elapsed = now - (f[3] + 0)
-          if (elapsed < 0) elapsed = 0
-          scores[f[1]] = (f[2] + 0) * exp(-0.693147 * elapsed / hl)
-        }
-      }
-    }
-    {
-      score = ($1 in scores) ? scores[$1] : 0
-      if (boost_path != "" && NF >= 3 && $3 != "") {
-        n = length(boost_path) < length($3) ? length(boost_path) : length($3)
-        cpl = 0
-        for (i = 1; i <= n; i++) {
-          if (substr($3, i, 1) == substr(boost_path, i, 1)) cpl++
-          else break
-        }
-        score += (cpl / 120.0) * path_boost
-      }
-      printf "%020.6f\t%s\n", score, $0
-    }
-  ' | sort -t$'\t' -k1 -rn | cut -f2-
+  SCORE_FILE="$SCORE_FILE" \
+  TMUX_SESSIONS_SCORE_HALF_LIFE="${TMUX_SESSIONS_SCORE_HALF_LIFE:-14}" \
+  TMUX_SESSIONS_SCORE_PATH_BOOST="${TMUX_SESSIONS_SCORE_PATH_BOOST:-1.0}" \
+    "$_PLUGIN_SCRIPTS_DIR/sort_by_score.py" "${1:-}"
 }
 
 # ── Project discovery ─────────────────────────────────────────────────────────
