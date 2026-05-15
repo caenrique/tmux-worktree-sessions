@@ -44,8 +44,9 @@ _ICON_SEP="${_ICON_SESSION:+ }"
 # TSV file storing per-session pick scores for recency ranking.
 SCORE_FILE="${TMUX_SESSIONS_SCORES_FILE:-$HOME/.local/share/tmux-sessions/scores.tsv}"
 
-# Absolute path to this script's directory so helpers (sort_by_score.py) are
-# locatable regardless of how common.sh was sourced.
+# Absolute path to this script's directory. Used as PYTHONPATH for the
+# tmux_sessions Python package so `python3 -m tmux_sessions ...` resolves
+# regardless of how common.sh was sourced.
 _PLUGIN_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── String utilities ──────────────────────────────────────────────────────────
@@ -171,7 +172,8 @@ sort_by_score() {
   SCORE_FILE="$SCORE_FILE" \
   TMUX_SESSIONS_SCORE_HALF_LIFE="${TMUX_SESSIONS_SCORE_HALF_LIFE:-14}" \
   TMUX_SESSIONS_SCORE_PATH_BOOST="${TMUX_SESSIONS_SCORE_PATH_BOOST:-1.0}" \
-    "$_PLUGIN_SCRIPTS_DIR/sort_by_score.py" "${1:-}"
+  PYTHONPATH="$_PLUGIN_SCRIPTS_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m tmux_sessions score sort "${1:-}"
 }
 
 # ── Project discovery ─────────────────────────────────────────────────────────

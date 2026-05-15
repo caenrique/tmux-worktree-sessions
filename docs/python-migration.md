@@ -65,7 +65,7 @@ removes the last bash file once parity is reached.
 **Acceptance:** `make check` passes (bats + shellcheck + Python tooling).
 The dispatcher exists but does nothing useful yet.
 
-### Step 2 — Move `sort_by_score.py` into the package `[ ]`
+### Step 2 — Move `sort_by_score.py` into the package `[x]`
 
 - Move `scripts/sort_by_score.py` to `scripts/tmux_sessions/score.py`.
 - Expose `score sort` as a subcommand of the dispatcher.
