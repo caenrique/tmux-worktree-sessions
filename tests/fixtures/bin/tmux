@@ -61,7 +61,7 @@ case "$cmd" in
       "#{session_path}")
         # Lookup by target session id (e.g. "$1")
         if [[ -n "$target" && -n "${TMUX_STUB_SESSIONS:-}" ]]; then
-          while IFS=$'\t' read -r n id p; do
+          while IFS=$'\t' read -r _ id p; do
             if [[ "$id" == "$target" ]]; then
               printf '%s' "$p"
               break

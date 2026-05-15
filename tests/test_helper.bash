@@ -63,7 +63,10 @@ source_common() {
 }
 
 # ── Minimal assertion library (subset of bats-assert, no install required) ────
+# These functions read $status, $output, and $lines — bats's `run` builtin
+# populates them in the calling scope, so shellcheck cannot see the assignment.
 
+# shellcheck disable=SC2154
 assert_success() {
   if (( status != 0 )); then
     printf 'expected success, got status=%d\noutput:\n%s\n' "$status" "$output" >&2
@@ -71,6 +74,7 @@ assert_success() {
   fi
 }
 
+# shellcheck disable=SC2154
 assert_failure() {
   local expected="${1:-}"
   if (( status == 0 )); then
@@ -91,6 +95,7 @@ assert_equal() {
   fi
 }
 
+# shellcheck disable=SC2154
 assert_output() {
   local mode=exact want
   case "$1" in
@@ -114,6 +119,7 @@ assert_output() {
   esac
 }
 
+# shellcheck disable=SC2154
 refute_output() {
   local mode=exact want
   case "$1" in
@@ -132,6 +138,7 @@ refute_output() {
   esac
 }
 
+# shellcheck disable=SC2154
 assert_line() {
   local n="" mode=exact want
   while (( $# )); do

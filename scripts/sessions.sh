@@ -249,6 +249,7 @@ _action_ctrl_r() {
 manage_sessions() {
   local tmpfile
   tmpfile=$(mktemp)
+  # shellcheck disable=SC2064  # tmpfile is local; expand now or it's gone at EXIT.
   trap "rm -f '$tmpfile' '${tmpfile}.new'" EXIT
   build_entries > "$tmpfile"
 
