@@ -1,102 +1,78 @@
-"""Pytest mirrors of the four bats `sort_by_score` cases.
+"""Pure-layer tests for the four bats `sort_by_score` scenarios.
 
-The bats cases exercise the bash shim end-to-end (subprocess + env vars).
-These cases test the underlying Python logic in-process.
+These exercise the underlying Python logic in-process. The bats cases
+exercise the bash shim end-to-end; the CLI handler is covered by
+`test_score_cli.py`.
 """
 
 from __future__ import annotations
 
-import io
-import time
-from pathlib import Path
+from tmux_sessions.score import current_scores, parse_score_table, sort_rows
 
-from tmux_sessions.score import run_sort
-
-
-def _seed(score_file: Path, name: str, score: float, ts: float | None = None) -> None:
-    score_file.parent.mkdir(parents=True, exist_ok=True)
-    if ts is None:
-        ts = time.time()
-    with score_file.open("a") as f:
-        f.write(f"{name}\t{score}\t{ts}\n")
+NOW = 1_700_000_000.0
+HALF_LIFE_SECS = 14 * 24 * 3600
 
 
-def _run(
-    stdin_text: str,
-    *,
-    boost_path: str,
-    score_file: Path,
-    path_boost: float = 1.0,
-    half_life_days: float = 14,
-) -> list[str]:
-    stdin = io.StringIO(stdin_text)
-    stdout = io.StringIO()
-    rc = run_sort(
-        boost_path,
-        score_file=str(score_file),
-        half_life_days=half_life_days,
-        path_boost=path_boost,
-        stdin=stdin,
-        stdout=stdout,
-    )
-    assert rc == 0
-    return stdout.getvalue().splitlines()
+def _scores_for(rows: list[tuple[str, float, float]]) -> dict[str, float]:
+    return current_scores(rows, now=NOW, half_life_secs=HALF_LIFE_SECS)
 
 
-def test_higher_score_first(tmp_path: Path) -> None:
-    score_file = tmp_path / "scores.tsv"
-    now = time.time()
-    _seed(score_file, "alpha", 1, now)
-    _seed(score_file, "beta", 9, now)
+def test_higher_score_first() -> None:
+    scores = _scores_for([("alpha", 1.0, NOW), ("beta", 9.0, NOW)])
 
-    lines = _run(
-        "alpha\t/p/a\t/p/a\nbeta\t/p/b\t/p/b\n",
+    lines = sort_rows(
+        ["alpha\t/p/a\t/p/a", "beta\t/p/b\t/p/b"],
         boost_path="",
-        score_file=score_file,
+        scores=scores,
+        path_boost=1.0,
     )
 
     assert lines[0].startswith("beta")
     assert lines[1].startswith("alpha")
 
 
-def test_path_boost_lifts_equal_score_row_sharing_prefix(tmp_path: Path) -> None:
-    score_file = tmp_path / "scores.tsv"
-    now = time.time()
-    _seed(score_file, "alpha", 1, now)
-    _seed(score_file, "beta", 1, now)
+def test_path_boost_lifts_equal_score_row_sharing_prefix() -> None:
+    scores = _scores_for([("alpha", 1.0, NOW), ("beta", 1.0, NOW)])
 
-    lines = _run(
-        "alpha\t/p/repo\t/p/repo/main\nbeta\t/q/other\t/q/other\n",
+    lines = sort_rows(
+        ["alpha\t/p/repo\t/p/repo/main", "beta\t/q/other\t/q/other"],
         boost_path="/p/repo/feature",
-        score_file=score_file,
+        scores=scores,
+        path_boost=1.0,
     )
 
     assert lines[0].startswith("alpha")
 
 
-def test_path_boost_disabled_at_zero_keeps_base_ordering(tmp_path: Path) -> None:
-    score_file = tmp_path / "scores.tsv"
-    now = time.time()
-    _seed(score_file, "alpha", 1, now)
-    _seed(score_file, "beta", 2, now)
+def test_path_boost_disabled_at_zero_keeps_base_ordering() -> None:
+    scores = _scores_for([("alpha", 1.0, NOW), ("beta", 2.0, NOW)])
 
-    lines = _run(
-        "alpha\t/p/repo\t/p/repo/main\nbeta\t/q/other\t/q/other\n",
+    lines = sort_rows(
+        ["alpha\t/p/repo\t/p/repo/main", "beta\t/q/other\t/q/other"],
         boost_path="/p/repo/feature",
-        score_file=score_file,
-        path_boost=0,
+        scores=scores,
+        path_boost=0.0,
     )
 
     assert lines[0].startswith("beta")
 
 
-def test_missing_score_file_treats_all_as_zero(tmp_path: Path) -> None:
-    score_file = tmp_path / "scores.tsv"  # never created
+def test_empty_score_table_treats_all_as_zero() -> None:
+    scores = _scores_for(parse_score_table(""))
 
-    lines = _run(
-        "alpha\t/p/a\t/p/a\nbeta\t/p/b\t/p/b\n",
+    lines = sort_rows(
+        ["alpha\t/p/a\t/p/a", "beta\t/p/b\t/p/b"],
         boost_path="",
-        score_file=score_file,
+        scores=scores,
+        path_boost=1.0,
     )
 
     assert len(lines) == 2
+    assert scores == {}
+
+
+def test_parse_score_table_skips_invalid_rows() -> None:
+    text = "alpha\t1.0\t100\nblank-row\nbeta\tnotnum\t200\ngamma\t2.0\t300\n"
+    rows = parse_score_table(text)
+
+    assert rows == [("alpha", 1.0, 100.0), ("gamma", 2.0, 300.0)]

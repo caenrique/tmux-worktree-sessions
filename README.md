@@ -130,13 +130,17 @@ Tests live in `tests/` and run under [bats-core](https://github.com/bats-core/ba
 
 ```sh
 brew install bats-core shellcheck
-pip install pytest pytest-mock ruff mypy   # or: pip install -e '.[dev]'
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'   # ruff, mypy, pytest, pytest-mock
 
 make check               # lint + bats + Python checks (default target)
 make test                # bats only
 make lint                # shellcheck only
 make py-check            # ruff + mypy + pytest
 ```
+
+The Makefile picks up `.venv/bin/{python,ruff,mypy}` automatically when
+the venv exists, so the `make py-*` targets work without activating it.
 
 All three suites run in CI on every push and pull request. Code changes should keep them green and address any shellcheck warnings on touched files.
 

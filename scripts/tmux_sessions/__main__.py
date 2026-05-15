@@ -1,8 +1,24 @@
+"""CLI dispatcher for the tmux_sessions package.
+
+This module owns every form of implicit I/O: argparse subcommand
+registration, environment-variable lookup, ``sys.stdin``/``stdout``,
+config/state file reads and writes, ``time.time()``, and exit codes.
+Each ``cmd_<group>_<verb>`` handler resolves these concerns once and
+calls into the pure layer with explicit parameters.
+
+Future migration steps add their own ``cmd_*`` handlers here. We keep
+all CLI handlers co-located so the I/O surface is easy to scan; we'll
+shard into ``cli/<group>.py`` only if this module ever gets unwieldy.
+"""
+
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import time
 from collections.abc import Sequence
+from pathlib import Path
 
 from . import score
 
@@ -12,31 +28,62 @@ def build_parser() -> argparse.ArgumentParser:
         prog="tmux_sessions",
         description="tmux-sessions Python helpers",
     )
-    subparsers = parser.add_subparsers(dest="command", metavar="<command>")
+    sub = parser.add_subparsers(dest="command", metavar="<command>")
 
-    score_parser = subparsers.add_parser("score", help="score storage and sorting")
-    score_subs = score_parser.add_subparsers(dest="score_command", metavar="<subcommand>")
+    score_p = sub.add_parser("score", help="score storage and sorting")
+    score_sub = score_p.add_subparsers(dest="score_command", metavar="<subcommand>")
 
-    sort_parser = score_subs.add_parser("sort", help="sort TSV input by score (highest first)")
-    sort_parser.add_argument(
+    sort_p = score_sub.add_parser("sort", help="sort TSV input by score (highest first)")
+    sort_p.add_argument(
         "boost_path",
         nargs="?",
         default="",
         help="path used for the path-similarity boost; empty disables",
     )
+    sort_p.set_defaults(handler=cmd_score_sort)
 
     return parser
+
+
+def cmd_score_sort(args: argparse.Namespace) -> int:
+    score_file = os.environ.get("SCORE_FILE", "")
+    half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
+    path_boost = float(os.environ.get("TMUX_SESSIONS_SCORE_PATH_BOOST") or 1.0)
+
+    if score_file:
+        try:
+            text = Path(score_file).read_text()
+        except FileNotFoundError:
+            text = ""
+    else:
+        text = ""
+
+    entries = score.parse_score_table(text)
+    scores = score.current_scores(
+        entries,
+        now=time.time(),
+        half_life_secs=half_life_days * 24 * 3600,
+    )
+    ranked = score.sort_rows(
+        sys.stdin.readlines(),
+        boost_path=args.boost_path,
+        scores=scores,
+        path_boost=path_boost,
+    )
+    for line in ranked:
+        sys.stdout.write(line)
+        sys.stdout.write("\n")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-
-    if args.command == "score" and args.score_command == "sort":
-        return score.run_sort(args.boost_path)
-
-    parser.print_usage(sys.stderr)
-    return 1
+    handler = getattr(args, "handler", None)
+    if handler is None:
+        parser.print_usage(sys.stderr)
+        return 1
+    return handler(args)  # type: ignore[no-any-return]
 
 
 if __name__ == "__main__":

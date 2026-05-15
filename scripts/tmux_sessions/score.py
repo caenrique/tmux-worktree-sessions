@@ -1,43 +1,21 @@
-"""Score storage and ranking for tmux-sessions picker entries.
+"""Pure scoring helpers for tmux-sessions picker entries.
 
 The score file is a TSV with one row per picked entry: ``name<TAB>score<TAB>ts``.
 Scores decay exponentially with a configurable half-life. ``sort_rows``
 orders TSV input lines by current score (highest first), optionally
 adding a path-similarity boost so same-repo worktrees outrank
 same-org projects.
+
+This module is the **pure layer** — it never touches ``os.environ``,
+``sys.stdin``/``stdout``, ``argparse``, the wall clock, or files. The
+CLI layer in ``tmux_sessions.__main__`` resolves those concerns and
+calls the functions below with explicit parameters.
 """
 
 from __future__ import annotations
 
 import math
-import os
-import sys
-import time
 from collections.abc import Iterable
-from typing import IO
-
-
-def load_scores(path: str, now: float, half_life_secs: float) -> dict[str, float]:
-    """Load decayed scores from ``path``. Returns ``{}`` if the file is missing."""
-    scores: dict[str, float] = {}
-    if not path:
-        return scores
-    try:
-        with open(path) as f:
-            for line in f:
-                parts = line.rstrip("\n").split("\t")
-                if len(parts) < 3 or not parts[0]:
-                    continue
-                try:
-                    base = float(parts[1])
-                    ts = float(parts[2])
-                except ValueError:
-                    continue
-                elapsed = max(0.0, now - ts)
-                scores[parts[0]] = base * math.exp(-math.log(2) * elapsed / half_life_secs)
-    except FileNotFoundError:
-        return scores
-    return scores
 
 
 def common_prefix_len(a: str, b: str) -> int:
@@ -46,6 +24,41 @@ def common_prefix_len(a: str, b: str) -> int:
         if a[i] != b[i]:
             return i
     return n
+
+
+def parse_score_table(text: str) -> list[tuple[str, float, float]]:
+    """Parse score-file text into ``(name, base, ts)`` rows.
+
+    Empty input yields ``[]``. Rows that are blank, missing fields, or
+    have non-numeric ``base``/``ts`` are silently skipped — the same
+    forgiving behaviour the awk pipeline had.
+    """
+    rows: list[tuple[str, float, float]] = []
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3 or not parts[0]:
+            continue
+        try:
+            base = float(parts[1])
+            ts = float(parts[2])
+        except ValueError:
+            continue
+        rows.append((parts[0], base, ts))
+    return rows
+
+
+def current_scores(
+    entries: Iterable[tuple[str, float, float]],
+    *,
+    now: float,
+    half_life_secs: float,
+) -> dict[str, float]:
+    """Apply exponential decay to each ``(name, base, ts)`` entry."""
+    scores: dict[str, float] = {}
+    for name, base, ts in entries:
+        elapsed = max(0.0, now - ts)
+        scores[name] = base * math.exp(-math.log(2) * elapsed / half_life_secs)
+    return scores
 
 
 def sort_rows(
@@ -71,42 +84,3 @@ def sort_rows(
         rows.append((-score, idx, line))
     rows.sort()
     return [line for _, _, line in rows]
-
-
-def run_sort(
-    boost_path: str,
-    *,
-    score_file: str | None = None,
-    half_life_days: float | None = None,
-    path_boost: float | None = None,
-    stdin: IO[str] | None = None,
-    stdout: IO[str] | None = None,
-    now: float | None = None,
-) -> int:
-    """CLI entry point for ``score sort``.
-
-    Reads TSV from ``stdin`` and writes the score-sorted rows to ``stdout``.
-    Configuration is read from ``SCORE_FILE``,
-    ``TMUX_SESSIONS_SCORE_HALF_LIFE`` (days), and
-    ``TMUX_SESSIONS_SCORE_PATH_BOOST`` when arguments are omitted.
-    """
-    if score_file is None:
-        score_file = os.environ.get("SCORE_FILE", "")
-    if half_life_days is None:
-        half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
-    if path_boost is None:
-        path_boost = float(os.environ.get("TMUX_SESSIONS_SCORE_PATH_BOOST") or 1.0)
-    if stdin is None:
-        stdin = sys.stdin
-    if stdout is None:
-        stdout = sys.stdout
-    if now is None:
-        now = time.time()
-
-    half_life_secs: float = half_life_days * 24 * 3600
-    scores = load_scores(score_file, now, half_life_secs)
-    sorted_lines = sort_rows(stdin, boost_path=boost_path, scores=scores, path_boost=path_boost)
-    for line in sorted_lines:
-        stdout.write(line)
-        stdout.write("\n")
-    return 0

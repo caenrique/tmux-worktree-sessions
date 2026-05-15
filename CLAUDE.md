@@ -54,13 +54,19 @@ The same scans run in CI via `.github/workflows/tests.yml`.
 
 A migration is in progress to move the bash scripts to a typed Python
 package under `scripts/tmux_sessions/` (see `docs/python-migration.md`).
-Python ≥ 3.8 is required; dev dependencies are declared in `pyproject.toml`:
+Python ≥ 3.8 is required; dev dependencies are declared in `pyproject.toml`.
+
+Set up a project-local virtualenv and install dev dependencies:
 
 ```sh
-pip install -e '.[dev]'
-# or, without the editable install:
-pip install pytest pytest-mock ruff mypy
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'
 ```
+
+The Makefile auto-detects `.venv/bin/{python,ruff,mypy}` when present,
+so the `make py-*` targets work without activating the venv. Override
+`PY=`, `RUFF=`, or `MYPY=` on the make command line to point at tools
+elsewhere.
 
 Per-tool make targets are wired up so each check can be run in isolation:
 

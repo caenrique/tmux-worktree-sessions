@@ -13,6 +13,19 @@ removes the last bash file once parity is reached.
   - The plugin must still work end-to-end (manual smoke check on tmux).
 - All Python code uses **explicit type annotations** on every function
   signature and on non-obvious local variables. `mypy --strict` must pass.
+- Every Python module under `scripts/tmux_sessions/` splits into a
+  **pure layer** (no `os.environ`, `sys.stdin`/`stdout`/`argv`,
+  `argparse`, wall-clock reads, or filesystem reads/writes for config
+  or state) and a **CLI layer** in `scripts/tmux_sessions/__main__.py`
+  that owns those concerns and calls into the pure layer with explicit
+  parameters. Subprocess wrappers (`git`, `tmux`, `fzf`) and filesystem
+  walks (`os.walk` for project discovery) belong in the pure layer when
+  every input is an explicit parameter — they are external state queries,
+  not CLI concerns. File I/O may live in the pure layer **only** when
+  streaming gives a measurable performance/memory win that affects the
+  plugin's interactivity, justified in a code comment at the call site.
+  This rule applies to Python code only; the bash shims keep their own
+  argv/env handling.
 - Bash and Python interoperate through a single CLI dispatcher
   (`python3 -m tmux_sessions <command> [args...]`). Each migrated bash
   function is replaced by a thin shim that calls the dispatcher.
@@ -78,113 +91,162 @@ The dispatcher exists but does nothing useful yet.
 **Acceptance:** `make check` green. `python3 -m tmux_sessions score sort`
 works as a drop-in replacement for the old script path.
 
+### Step 2.5 — Establish CLI / pure logic separation `[x]`
+
+- Refactor `scripts/tmux_sessions/score.py` to be a pure module:
+  `parse_score_table(text: str) -> list[tuple[str, float, float]]`,
+  `current_scores(entries, *, now, half_life_secs) -> dict[str, float]`,
+  `sort_rows(lines, *, boost_path, scores, path_boost) -> list[str]`,
+  `common_prefix_len(a, b) -> int`. No `os.environ`, `sys.*`,
+  `time.time()`, or `open()`. All keyword arguments after `*` are
+  required — no `T | None = None` env-fallback parameters.
+- Move the CLI layer into `scripts/tmux_sessions/__main__.py`:
+  argparse subparsers with `set_defaults(handler=cmd_<group>_<verb>)`,
+  one `cmd_score_sort` handler that reads env, opens the score file,
+  reads stdin, calls the pure functions, and writes stdout.
+- Rewrite `tests/python/test_score.py` as **pure** tests against the new
+  functions (no env, no file I/O, no subprocess). Add
+  `tests/python/test_score_cli.py` covering the CLI handler via
+  `main(["score", "sort", ...])` with `monkeypatch` for env / stdin /
+  stdout and a real `tmp_path` score file.
+- Bash shim (`sort_by_score()` in `common.sh`) is unchanged: still
+  `python3 -m tmux_sessions score sort "$@"`. Bats `sort_by_score`
+  cases continue to exercise the round-trip end-to-end.
+
+**Acceptance:** `make check` green. The pure / CLI split establishes
+the shape every later migration step inherits.
+
 ---
 
 ## Phase 1 — Pure utilities
 
-These are stateless string functions. Each step adds the Python
-implementation, registers a CLI subcommand, and replaces the bash
-function body with a one-line dispatcher call. Tests gain parallel
-pytest coverage; bats coverage is unchanged.
+These are stateless string functions. Each step adds a pure
+implementation in a domain module, registers a CLI subcommand in
+`__main__.py`, and replaces the bash function body with a one-line
+dispatcher call. Tests gain parallel pytest coverage; bats coverage is
+unchanged.
 
 ### Step 3 — `strip_ansi` `[ ]`
 
-- Add `scripts/tmux_sessions/text.py` with `strip_ansi(s: str) -> str`.
-- Register `text strip-ansi` subcommand.
+- Pure: `text.strip_ansi(s: str) -> str` in
+  `scripts/tmux_sessions/text.py`.
+- CLI: `cmd_text_strip_ansi` registers `text strip-ansi`, reads stdin
+  (or argv), writes stdout.
 - Replace `strip_ansi()` in `common.sh` with a dispatcher call.
 - Add `tests/python/test_text.py` covering the same cases as bats.
 
 ### Step 4 — `sanitize_name` `[ ]`
 
-- Add `sanitize_name(s: str) -> str` to `text.py`.
-- Register `text sanitize-name`.
+- Pure: `text.sanitize_name(s: str) -> str`.
+- CLI: `cmd_text_sanitize_name` registers `text sanitize-name`.
 - Replace bash function. Pytest parity with bats cases.
 
 ### Step 5 — `branch_to_dir` `[ ]`
 
-- Add `branch_to_dir(name: str) -> str` to a new
-  `scripts/tmux_sessions/git.py` (this is the seed for git helpers).
-- Register `git branch-to-dir`. Replace bash. Pytest parity.
+- Pure: `git.branch_to_dir(name: str) -> str` in a new
+  `scripts/tmux_sessions/git.py` (seed for git helpers).
+- CLI: `cmd_git_branch_to_dir` registers `git branch-to-dir`.
+- Replace bash. Pytest parity.
 
 ### Step 6 — `format_session_name` `[ ]`
 
-- Add `format_session_name(path: str, *, home: str | None = None,
-  strip_prefixes: list[str] | None = None) -> str` to
-  `scripts/tmux_sessions/text.py`.
-- Read `TMUX_SESSIONS_STRIP_PREFIXES` and `$HOME` from env when
-  arguments are omitted (mirroring the bash function).
-- Register `text format-session-name`. Replace bash. Pytest parity
-  including: longest-prefix-strip, `$HOME`→`~`, no-match fallthrough.
+- Pure: `text.format_session_name(path: str, *, home: str,
+  strip_prefixes: list[str]) -> str`. Both kwargs required — no env
+  fallbacks in the pure layer.
+- CLI: `cmd_text_format_session_name` reads
+  `TMUX_SESSIONS_STRIP_PREFIXES` and `$HOME` from env, calls the pure
+  function. Registers `text format-session-name`.
+- Replace bash. Pytest parity in pure tests including:
+  longest-prefix-strip, `$HOME`→`~`, no-match fallthrough.
 
 ### Step 7 — Score writer `update_score` `[ ]`
 
-- Add `update_score(name: str, score_file: Path, half_life_days: float,
-  now: float | None = None) -> None` to `score.py`.
-- Register `score update`. Replace the bash awk pipeline.
-- Pytest cases: fresh file, in-place update with decay, parent dir
-  auto-created, simultaneous concurrent writes.
+- Pure: `score.merge_score(entries: list[tuple[str, float, float]], *,
+  name: str, now: float, half_life_secs: float) ->
+  list[tuple[str, float, float]]`. Returns the rewritten table; no file
+  I/O.
+- CLI: `cmd_score_update` reads `SCORE_FILE` and
+  `TMUX_SESSIONS_SCORE_HALF_LIFE` from env, parses the file via
+  `parse_score_table`, calls `merge_score`, writes back atomically
+  (tmpfile + rename, parent dir auto-created). Registers `score update`.
+- Pytest cases: pure tests for `merge_score` (fresh entry, in-place
+  update with decay, multiple existing entries preserved). CLI tests
+  for the file-write side: fresh file, parent dir auto-created.
 
 ---
 
 ## Phase 2 — Git helpers (subprocess wrappers)
 
-`scripts/tmux_sessions/git.py` accumulates here. Each function shells out
-to real `git` exactly as the bash version does, but with structured
-return types (`dataclass`es, `list[Branch]`, etc.).
+`scripts/tmux_sessions/git.py` accumulates here. Each function shells
+out to real `git` exactly as the bash version does, but with structured
+return types (`dataclass`es, `list[Branch]`, etc.). Subprocess calls
+take `repo: Path` as an explicit parameter, so they live in the pure
+layer; CLI handlers in `__main__.py` are one-line passthroughs.
 
 ### Step 8 — `_resolve_remote` and `get_default_branch` `[ ]`
 
-- Add `resolve_remote(repo: Path) -> str | None` and
-  `default_branch(repo: Path) -> str | None`.
-- Register `git resolve-remote`, `git default-branch`.
+- Pure: `git.resolve_remote(repo: Path) -> str | None` and
+  `git.default_branch(repo: Path) -> str | None` — both shell out to
+  real `git`.
+- CLI: `cmd_git_resolve_remote`, `cmd_git_default_branch` (one-line
+  passthroughs).
 - Replace the two bash helpers. Pytest parity using real tmpdir repos
   (the same `mkrepo` strategy as bats).
 
 ### Step 9 — `list_branches` `[ ]`
 
-- Add `list_branches(repo: Path) -> list[str]`.
-- Register `git list-branches`. Replace bash. Pytest parity.
+- Pure: `git.list_branches(repo: Path) -> list[str]`.
+- CLI: `cmd_git_list_branches` (passthrough).
+- Replace bash. Pytest parity.
 
 ### Step 10 — `list_worktrees` `[ ]`
 
-- Add `list_worktrees(repo: Path) -> list[Worktree]` (dataclass with
-  `path: Path`, `branch: str`).
-- Register `git list-worktrees` (TSV output for shell consumers).
+- Pure: `git.list_worktrees(repo: Path) -> list[Worktree]` (dataclass
+  with `path: Path`, `branch: str`).
+- CLI: `cmd_git_list_worktrees` serialises the dataclass list to TSV
+  for shell consumers.
 - Replace bash. Pytest parity.
 
 ### Step 11 — `add_worktree` `[ ]`
 
-- Add `add_worktree(repo: Path, container: Path, branch: str | None,
-  new_name: str | None) -> Path`.
-- Register `git add-worktree`. Replace bash. Pytest parity covering the
-  four bash branches (new branch, existing local, already checked out,
-  remote-only tracking).
+- Pure: `git.add_worktree(repo: Path, container: Path, branch:
+  str | None, new_name: str | None) -> Path`.
+- CLI: `cmd_git_add_worktree` (passthrough).
+- Replace bash. Pytest parity covering the four bash branches (new
+  branch, existing local, already checked out, remote-only tracking).
 
 ### Step 12 — `rename_worktree` `[ ]`
 
-- Add `rename_worktree(...)`.
-- This one has interactive fzf inside the bash version. Migrate the
-  pure git/move/repair logic to Python; keep the fzf prompt in bash and
-  pass the chosen new name into the Python helper. (The fzf piece moves
-  to Python in Phase 3.)
-- Register `git rename-worktree`. Replace the post-prompt half of the
-  bash function. Pytest parity for the git/move/repair logic.
+- Pure: `git.rename_worktree(...)` — does the git/move/repair logic.
+- CLI: `cmd_git_rename_worktree` (passthrough); the interactive fzf
+  prompt stays in bash for now and passes the chosen new name in. (The
+  fzf piece moves to Python in Phase 3.)
+- Replace the post-prompt half of the bash function. Pytest parity for
+  the git/move/repair logic.
 
 ### Step 13 — `_fetch_is_stale` `[ ]`
 
-- Add `fetch_is_stale(repo: Path, window_secs: int = 900) -> bool`.
-- Use `Path.stat().st_mtime` directly — no GNU/BSD `stat` divergence.
-- Register `git fetch-is-stale`. Replace bash. Pytest parity (missing
-  FETCH_HEAD, fresh, > 15 min old).
+- Pure: `git.fetch_is_stale(mtime: float | None, *, now: float,
+  window_secs: int = 900) -> bool`. The pure function takes the mtime
+  directly so it stays trivially testable; missing FETCH_HEAD is
+  encoded as `mtime is None`.
+- CLI: `cmd_git_fetch_is_stale` resolves the FETCH_HEAD path, calls
+  `Path.stat().st_mtime` (handling `FileNotFoundError` → `None`), and
+  passes the result in along with `time.time()`.
+- No GNU/BSD `stat` divergence. Pytest parity (missing FETCH_HEAD,
+  fresh, > 15 min old) covered in pure tests.
 
 ### Step 14 — `list_git_projects` `[ ]`
 
-- Add `list_git_projects(roots: list[Path], max_depth: int) ->
+- Pure: `git.list_git_projects(roots: list[Path], max_depth: int) ->
   list[Project]` using `os.walk` (no fd/find shellout, simpler in
-  Python). Drop the fd/find branching entirely.
-- Register `git list-projects`. Replace bash. Pytest parity.
-- Update bats `list_projects` test if the output format changes
-  meaningfully (it should not).
+  Python). Drop the fd/find branching entirely. `os.walk` belongs in
+  the pure layer because every input is an explicit parameter.
+- CLI: `cmd_git_list_projects` reads `TMUX_SESSIONS_PROJECTS_DIRS` and
+  `TMUX_SESSIONS_MAX_DEPTH` from env, expands `~`, calls the pure
+  function, prints TSV.
+- Replace bash. Pytest parity. Update bats `list_projects` test if the
+  output format changes meaningfully (it should not).
 
 ---
 
@@ -192,35 +254,46 @@ return types (`dataclass`es, `list[Branch]`, etc.).
 
 ### Step 15 — `get_session_id`, `switch_or_create_session` `[ ]`
 
-- Add `scripts/tmux_sessions/tmux.py` with these helpers, calling real
-  `tmux` via `subprocess.run`.
-- Register `tmux session-id`, `tmux switch-or-create`.
+- Pure: `tmux.session_id(name: str) -> str | None` and
+  `tmux.switch_or_create(path: Path, name: str) -> None` in
+  `scripts/tmux_sessions/tmux.py`. Both shell out to real `tmux` via
+  `subprocess.run`.
+- CLI: `cmd_tmux_session_id`, `cmd_tmux_switch_or_create`
+  (passthroughs).
 - Replace bash. Pytest parity using the existing tmux stub
   (reuse `tests/fixtures/bin/tmux` from a Python fixture that prepends
   it to `PATH`).
 
 ### Step 16 — `_gen_branch_picker_entries` `[ ]`
 
-- Add `gen_branch_picker_entries(repo: Path, icon_set: str) ->
-  Iterator[str]` to `scripts/tmux_sessions/picker.py`.
-- Register `picker branch-entries`. Replace bash. Pytest parity.
+- Pure: `picker.gen_branch_picker_entries(repo: Path, *, icons:
+  IconSet) -> Iterator[str]` in `scripts/tmux_sessions/picker.py`.
+- CLI: `cmd_picker_branch_entries` reads `TMUX_SESSIONS_ICON_STYLE`
+  from env, builds the `IconSet`, calls the pure function.
+- Replace bash. Pytest parity.
 
 ### Step 17 — `pick_branch` `[ ]`
 
-- Add `pick_branch(repo: Path) -> BranchChoice` to `picker.py`.
-- Spawn fzf via `subprocess.Popen` with the same flags. Background
-  fetch+reload via `concurrent.futures` or `multiprocessing`.
-- Register `picker pick-branch`. Replace bash. Pytest parity using the
-  fzf stub (the bats stub strategy ports cleanly).
+- Pure: `picker.pick_branch(repo: Path, *, icons: IconSet) ->
+  BranchChoice` — spawns fzf via `subprocess.Popen` with the same
+  flags; background fetch+reload via `concurrent.futures` or
+  `multiprocessing`. Subprocess calls are external state queries, so
+  this stays in the pure layer.
+- CLI: `cmd_picker_pick_branch` (passthrough; resolves icons from env).
+- Replace bash. Pytest parity using the fzf stub (the bats stub
+  strategy ports cleanly).
 
 ### Step 18 — `fetch_reload.sh` `[ ]`
 
-- Move logic to `scripts/tmux_sessions/fetch_reload.py`. Spinner via
-  a thread or async task; `requests`-free (use `urllib.request` to keep
-  the package zero-dependency at runtime).
+- Pure: `fetch_reload.fetch_and_reload(repo: Path, tmpfile: Path, port:
+  int, header_base: str) -> None` in
+  `scripts/tmux_sessions/fetch_reload.py`. Spinner via a thread;
+  `requests`-free (use `urllib.request` to keep the package
+  zero-dependency at runtime).
+- CLI: `cmd_fetch_reload` (passthrough).
 - Replace `scripts/fetch_reload.sh` with a one-line shim that calls
   `python3 -m tmux_sessions fetch-reload "$@"`. Once Phase 4 lands,
-  pick_branch invokes the Python entry point directly and the shim
+  `pick_branch` invokes the Python entry point directly and the shim
   is deleted.
 - Pytest parity for the four bats fetch_reload cases.
 
@@ -230,14 +303,20 @@ return types (`dataclass`es, `list[Branch]`, etc.).
 
 ### Step 19 — `list_projects` (sessions.sh) and `_is_orphaned_worktree_dir` `[ ]`
 
-- Move both to `scripts/tmux_sessions/sessions.py`.
-- Register `sessions list-projects`, `sessions is-orphaned-worktree`.
+- Pure: `sessions.list_projects(...)` and
+  `sessions.is_orphaned_worktree(path: Path, *, container: Path) ->
+  bool` in `scripts/tmux_sessions/sessions.py`.
+- CLI: `cmd_sessions_list_projects`,
+  `cmd_sessions_is_orphaned_worktree` (passthroughs).
 - Replace bash. Pytest parity.
 
 ### Step 20 — `_action_ctrl_x`, `_action_ctrl_r`, `_action_ctrl_d` `[ ]`
 
 - Migrate one action per substep (so this is really three commits
   inside Step 20: 20a, 20b, 20c).
+- Pure: three action implementations in `sessions.py`, each taking the
+  tmpfile path and the selected entry as explicit parameters.
+- CLI: one `cmd_sessions_action_<name>` per action.
 - Each action is replaced atomically: bash dispatcher in `sessions.sh`
   calls `python3 -m tmux_sessions sessions action <name> ...`.
 - The shared tmpfile state-machine logic stays correct because the
@@ -246,16 +325,18 @@ return types (`dataclass`es, `list[Branch]`, etc.).
 
 ### Step 21 — `build_entries` `[ ]`
 
-- Migrate the 3-column TSV builder to Python. Calls into Phase 1–3
-  helpers directly (no shellout) so the inner loops avoid spawning
-  Python repeatedly.
-- Register `sessions build-entries`. Replace bash. Pytest parity.
+- Pure: `sessions.build_entries(...)` — the 3-column TSV builder. Calls
+  into Phase 1–3 pure helpers directly (no shellout) so the inner
+  loops avoid spawning Python repeatedly.
+- CLI: `cmd_sessions_build_entries` (passthrough).
+- Replace bash. Pytest parity.
 
 ### Step 22 — `manage_sessions` `[ ]`
 
-- Migrate the main fzf loop. This is the largest single step; the
-  function dispatches on the chosen key and calls into the migrated
-  helpers.
+- Pure: `sessions.manage_sessions(...)` — the main fzf loop. Largest
+  single step; dispatches on the chosen key and calls into the
+  migrated helpers.
+- CLI: `cmd_sessions_manage` is a one-line passthrough.
 - After this step, `scripts/sessions.sh` is reduced to a one-line
   shim: `exec python3 -m tmux_sessions sessions manage`.
 
