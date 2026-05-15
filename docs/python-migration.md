@@ -36,7 +36,7 @@ removes the last bash file once parity is reached.
 
 ## Phase 0 — Tooling
 
-### Step 1 — Set up Python project tooling `[ ]`
+### Step 1 — Set up Python project tooling `[x]`
 
 - Add `pyproject.toml` at repo root declaring:
   - Build/runtime: `requires-python = ">=3.8"`, package layout pointing at

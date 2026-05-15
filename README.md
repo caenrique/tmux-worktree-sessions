@@ -126,16 +126,19 @@ When you create a worktree via `Ctrl-W`, the new directory is placed as a siblin
 
 ## Development
 
-Tests live in `tests/` and run under [bats-core](https://github.com/bats-core/bats-core); shell scripts are linted with [shellcheck](https://www.shellcheck.net/). The Makefile wraps both:
+Tests live in `tests/` and run under [bats-core](https://github.com/bats-core/bats-core); shell scripts are linted with [shellcheck](https://www.shellcheck.net/). A Python migration is in progress (see `docs/python-migration.md`): new code under `scripts/tmux_sessions/` is checked with `pytest`, `ruff`, and `mypy --strict`. The Makefile wraps everything:
 
 ```sh
 brew install bats-core shellcheck
-make check       # lint + test (default target)
-make test        # bats only
-make lint        # shellcheck only
+pip install pytest pytest-mock ruff mypy   # or: pip install -e '.[dev]'
+
+make check               # lint + bats + Python checks (default target)
+make test                # bats only
+make lint                # shellcheck only
+make py-check            # ruff + mypy + pytest
 ```
 
-Both run on Linux (and bats also on macOS) in CI on every push and pull request. Code changes should keep the suite green and address any shellcheck warnings on touched files.
+All three suites run in CI on every push and pull request. Code changes should keep them green and address any shellcheck warnings on touched files.
 
 ## Recency ranking
 

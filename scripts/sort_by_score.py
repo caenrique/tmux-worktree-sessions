@@ -36,21 +36,20 @@ def load_scores(path: str, now: float, half_life_secs: float) -> dict[str, float
     if not path:
         return scores
     try:
-        f = open(path)
+        with open(path) as f:
+            for line in f:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 3 or not parts[0]:
+                    continue
+                try:
+                    base = float(parts[1])
+                    ts = float(parts[2])
+                except ValueError:
+                    continue
+                elapsed = max(0.0, now - ts)
+                scores[parts[0]] = base * math.exp(-math.log(2) * elapsed / half_life_secs)
     except FileNotFoundError:
         return scores
-    with f:
-        for line in f:
-            parts = line.rstrip("\n").split("\t")
-            if len(parts) < 3 or not parts[0]:
-                continue
-            try:
-                base = float(parts[1])
-                ts = float(parts[2])
-            except ValueError:
-                continue
-            elapsed = max(0.0, now - ts)
-            scores[parts[0]] = base * math.exp(-math.log(2) * elapsed / half_life_secs)
     return scores
 
 

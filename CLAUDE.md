@@ -45,10 +45,38 @@ Run it from the repo root before committing:
 
 ```sh
 make lint                  # shellcheck only
-make check                 # lint + test (the default target)
+make check                 # lint + bats + Python checks (the default target)
 ```
 
 The same scans run in CI via `.github/workflows/tests.yml`.
+
+## Python tooling
+
+A migration is in progress to move the bash scripts to a typed Python
+package under `scripts/tmux_sessions/` (see `docs/python-migration.md`).
+Python ≥ 3.8 is required; dev dependencies are declared in `pyproject.toml`:
+
+```sh
+pip install -e '.[dev]'
+# or, without the editable install:
+pip install pytest pytest-mock ruff mypy
+```
+
+Per-tool make targets are wired up so each check can be run in isolation:
+
+```sh
+make py-test           # pytest (tests/python)
+make py-lint           # ruff check
+make py-format-check   # ruff format --check
+make py-typecheck      # mypy --strict on scripts/tmux_sessions
+make py-check          # all four above
+```
+
+`make check` includes `py-check`, so a full local check is `make check`.
+
+All Python code uses **explicit type annotations** on every function
+signature; `mypy --strict` must pass. `tests/python/` mirrors the bats
+suite as functions are migrated.
 
 ## Change policy
 
