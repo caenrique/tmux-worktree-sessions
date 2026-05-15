@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Shared utilities sourced by sessions.sh and fetch_reload.sh.
 # Also contains all git-worktree helpers so sessions.sh can create
 # worktrees without additional scripts.
@@ -74,8 +74,13 @@ format_session_name() {
     fi
   done
 
-  # Replace the home directory path with a tilde.
-  echo "${session_name/#$HOME/~}"
+  # Replace the home directory path with a tilde. Done with prefix-strip + concat
+  # rather than ${var/#$HOME/~}: bash 5 tilde-expands the replacement, undoing the
+  # substitution on Linux while working "by accident" on bash 3.2 (macOS).
+  if [[ "$session_name" == "$HOME" || "$session_name" == "$HOME"/* ]]; then
+    session_name="~${session_name#"$HOME"}"
+  fi
+  echo "$session_name"
 }
 
 # Return the tmux session ID ($N) for a session with the given exact name.
@@ -431,8 +436,13 @@ _fetch_is_stale() {
   [[ "$git_common" != /* ]] && git_common="$repo_path/$git_common"
   fetch_head="$git_common/FETCH_HEAD"
   [[ -f "$fetch_head" ]] || return 0
-  # stat -f is BSD/macOS; stat -c is GNU/Linux.
-  mtime=$(stat -f %m "$fetch_head" 2>/dev/null || stat -c %Y "$fetch_head" 2>/dev/null) || return 0
+  # GNU stat -f means --file-system (multi-line output); BSD stat -f means --format.
+  # Branch on uname so the wrong flag never gets a chance to "succeed".
+  case "$(uname -s)" in
+    Darwin|*BSD) mtime=$(stat -f %m "$fetch_head" 2>/dev/null) ;;
+    *)           mtime=$(stat -c %Y "$fetch_head" 2>/dev/null) ;;
+  esac
+  [[ -z "$mtime" ]] && return 0
   now=$(date +%s)
   (( now - mtime > window ))
 }

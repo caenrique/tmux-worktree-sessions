@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Session manager invoked by the tmux-sessions key binding.
 # Shows a unified list: running sessions (green, sorted by recency) at the top,
 # followed by projects without a session.  All actions are in a single fzf picker.
@@ -9,7 +9,7 @@
 #   Ctrl-R    — rename worktree (branch + dir + repair) if linked; session name otherwise
 #   Ctrl-BS   — close picker
 
-source "$(dirname "$0")/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Emit one "session_name<TAB>cwd" line per discoverable project.
 # TMUX_SESSIONS_MANUAL_SESSIONS is a space-separated list of "name:path" pairs.
@@ -249,6 +249,7 @@ _action_ctrl_r() {
 manage_sessions() {
   local tmpfile
   tmpfile=$(mktemp)
+  # shellcheck disable=SC2064  # tmpfile is local; expand now or it's gone at EXIT.
   trap "rm -f '$tmpfile' '${tmpfile}.new'" EXIT
   build_entries > "$tmpfile"
 
@@ -358,21 +359,24 @@ manage_sessions() {
 }
 
 # ── Entry point ───────────────────────────────────────────────────────────────
-if [[ "$1" == --action ]]; then
-  case "$2" in
-    ctrl-d) _action_ctrl_d "${@:3}" ;;
-    ctrl-x) _action_ctrl_x "${@:3}" ;;
-    ctrl-r) _action_ctrl_r "${@:3}" ;;
-  esac
-  exit
-fi
+# Skip dispatch when this file is sourced (e.g. by tests) rather than executed.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  if [[ "${1:-}" == --action ]]; then
+    case "$2" in
+      ctrl-d) _action_ctrl_d "${@:3}" ;;
+      ctrl-x) _action_ctrl_x "${@:3}" ;;
+      ctrl-r) _action_ctrl_r "${@:3}" ;;
+    esac
+    exit
+  fi
 
-# --display-name <session_path> <session_name>
-# For use in the tmux status bar to restore dots that tmux converted to underscores.
-if [[ "$1" == --display-name ]]; then
-  derived=$(format_session_name "$2")
-  [[ "${derived//./_}" == "$3" ]] && printf '%s' "$derived" || printf '%s' "$3"
-  exit
-fi
+  # --display-name <session_path> <session_name>
+  # For use in the tmux status bar to restore dots that tmux converted to underscores.
+  if [[ "${1:-}" == --display-name ]]; then
+    derived=$(format_session_name "$2")
+    [[ "${derived//./_}" == "$3" ]] && printf '%s' "$derived" || printf '%s' "$3"
+    exit
+  fi
 
-manage_sessions
+  manage_sessions
+fi

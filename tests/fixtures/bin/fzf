@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Programmable fzf stub.
+#   - Reads stdin to FZF_STUB_STDIN_LOG (separated by ###CALL### markers).
+#   - Logs argv to FZF_STUB_INVOCATION_LOG (one TSV row per call).
+#   - Pops the next response block from FZF_STUB_QUEUE (separator line: ###END###)
+#     and prints it on stdout. Exit code is popped from FZF_STUB_EXIT_QUEUE.
+#   - If queue is empty, exits 130 (Esc) so unconfigured tests fail loudly.
+
+set -uo pipefail
+
+{
+  printf '###CALL###\n'
+  cat
+} >> "${FZF_STUB_STDIN_LOG:-/dev/null}" 2>/dev/null || true
+
+{
+  printf 'fzf'
+  for a in "$@"; do printf '\t%s' "$a"; done
+  printf '\n'
+} >> "${FZF_STUB_INVOCATION_LOG:-/dev/null}" 2>/dev/null || true
+
+queue="${FZF_STUB_QUEUE:-}"
+exit_queue="${FZF_STUB_EXIT_QUEUE:-}"
+
+if [[ -z "$queue" || ! -s "$queue" ]]; then
+  exit 130
+fi
+
+contents=$(cat "$queue")
+
+# Pop the first block (everything up to the first "\n###END###\n" line).
+sep=$'\n###END###'
+if [[ "$contents" == *"$sep"* ]]; then
+  block="${contents%%$sep*}"
+  rest="${contents#*$sep}"
+  rest="${rest#$'\n'}"
+else
+  block="$contents"
+  rest=""
+fi
+
+printf '%s\n' "$block"
+
+if [[ -n "$rest" ]]; then
+  printf '%s' "$rest" > "$queue"
+else
+  : > "$queue"
+fi
+
+rc=0
+if [[ -s "$exit_queue" ]]; then
+  rc=$(head -n1 "$exit_queue")
+  tail -n +2 "$exit_queue" > "$exit_queue.new" && mv "$exit_queue.new" "$exit_queue"
+fi
+exit "${rc:-0}"

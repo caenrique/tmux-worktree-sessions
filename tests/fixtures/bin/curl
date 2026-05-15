@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# curl stub: log every invocation to CURL_STUB_LOG and exit 0. Never networks.
+
+{
+  printf 'curl'
+  for a in "$@"; do printf '\t%s' "$a"; done
+  printf '\n'
+} >> "${CURL_STUB_LOG:-/dev/null}" 2>/dev/null || true
+
+exit 0

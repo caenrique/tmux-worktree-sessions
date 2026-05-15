@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Programmable tmux stub. Records every invocation to TMUX_STUB_LOG (TSV) and
+# returns canned output driven by env vars set by the test:
+#
+#   TMUX_STUB_SESSIONS  — newline-sep TSV rows: name<TAB>id<TAB>path
+#   TMUX_STUB_CURRENT   — `display-message -p '#{session_name}'`
+#   TMUX_STUB_PREV      — `display-message -p '#{client_last_session}'`
+#   TMUX_STUB_PANE_PATH — `display-message -p '#{pane_current_path}'`
+#   TMUX_STUB_NEW_ID    — id printed by `new-session ... -P -F '#{session_id}'`
+#   TMUX_STUB_OPTIONS   — newline-sep `key=value` for `show-option -gqv key`
+
+set -uo pipefail
+
+# Log invocation
+{
+  printf 'tmux'
+  for a in "$@"; do printf '\t%s' "$a"; done
+  printf '\n'
+} >> "${TMUX_STUB_LOG:-/dev/null}" 2>/dev/null || true
+
+cmd="${1:-}"
+
+# Resolve a single format string against a `name<TAB>id<TAB>path` row.
+expand_fmt() {
+  local fmt="$1" name="$2" id="$3" path="$4"
+  fmt="${fmt//#\{session_name\}/$name}"
+  fmt="${fmt//#\{session_id\}/$id}"
+  fmt="${fmt//#\{session_path\}/$path}"
+  printf '%s' "$fmt"
+}
+
+case "$cmd" in
+  ls)
+    # tmux ls [-F <fmt>]
+    fmt="#{session_id}: #{session_name}"
+    if [[ "${2:-}" == "-F" ]]; then fmt="$3"; fi
+    while IFS=$'\t' read -r name id path; do
+      [[ -z "$name" ]] && continue
+      expand_fmt "$fmt" "$name" "$id" "$path"
+      printf '\n'
+    done <<<"${TMUX_STUB_SESSIONS:-}"
+    ;;
+
+  display-message)
+    # display-message -p [-t target] <fmt>
+    shift
+    target=""
+    fmt=""
+    while (( $# )); do
+      case "$1" in
+        -p) shift ;;
+        -t) target="$2"; shift 2 ;;
+        -d) shift 2 ;;  # display duration, ignore
+        *)  fmt="$1"; shift ;;
+      esac
+    done
+    case "$fmt" in
+      "#{session_name}")        printf '%s' "${TMUX_STUB_CURRENT:-}" ;;
+      "#{client_last_session}") printf '%s' "${TMUX_STUB_PREV:-}" ;;
+      "#{pane_current_path}")   printf '%s' "${TMUX_STUB_PANE_PATH:-}" ;;
+      "#{session_path}")
+        # Lookup by target session id (e.g. "$1")
+        if [[ -n "$target" && -n "${TMUX_STUB_SESSIONS:-}" ]]; then
+          while IFS=$'\t' read -r _ id p; do
+            if [[ "$id" == "$target" ]]; then
+              printf '%s' "$p"
+              break
+            fi
+          done <<<"$TMUX_STUB_SESSIONS"
+        fi
+        ;;
+      "")
+        : ;;
+      *)
+        # Unknown format — print empty, log only.
+        : ;;
+    esac
+    ;;
+
+  new-session)
+    # tmux new-session -c <path> -s <name> -d -P -F '#{session_id}'
+    id="${TMUX_STUB_NEW_ID:-\$99}"
+    printf '%s' "$id"
+    ;;
+
+  switch-client|kill-session|rename-session|bind-key|capture-pane|source)
+    # Pure side-effect: log only (already logged at top).
+    :
+    ;;
+
+  show-option)
+    # show-option -gqv <key>
+    shift
+    while (( $# )); do
+      case "$1" in
+        -g|-q|-v) shift ;;
+        *) key="$1"; shift ;;
+      esac
+    done
+    if [[ -n "${TMUX_STUB_OPTIONS:-}" ]]; then
+      while IFS='=' read -r k v; do
+        if [[ "$k" == "${key:-}" ]]; then
+          printf '%s' "$v"
+          break
+        fi
+      done <<<"$TMUX_STUB_OPTIONS"
+    fi
+    ;;
+
+  -V)
+    printf 'tmux 3.4 (stub)\n' ;;
+
+  *)
+    : ;;
+esac
+
+exit 0

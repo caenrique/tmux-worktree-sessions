@@ -4,19 +4,66 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Testing
 
-There is no test suite. Test changes by reloading the plugin inside a live tmux session:
+The test suite lives in `tests/` and runs under [bats-core](https://github.com/bats-core/bats-core). Install the runner from your package manager:
 
 ```sh
-tmux source ~/.config/tmux/tmux.conf
+brew install bats-core
+# or on Debian/Ubuntu:
+sudo apt-get install bats
 ```
 
-Then trigger the picker with the configured key (default `Ctrl+Shift+S`). To test a specific script directly:
+`tests/test_helper.bash` ships a minimal portable assertion library, so `bats-support` / `bats-assert` / `bats-file` are not required.
+
+Run the full suite via the Makefile, or invoke bats directly for finer control:
+
+```sh
+make test                                      # full bats suite
+bats tests/common.bats                         # one file
+bats --filter "format_session_name" tests/     # one function
+bats --print-output-on-failure tests/          # show captured output on failure
+```
+
+For ad-hoc smoke checks, you can still drive a script directly:
 
 ```sh
 TMUX_SESSIONS_PROJECTS_DIRS="$HOME/Projects" \
 TMUX_SESSIONS_ICON_STYLE=nerd \
 bash scripts/sessions.sh
 ```
+
+## Linting
+
+Shell scripts are linted with [shellcheck](https://www.shellcheck.net/):
+
+```sh
+brew install shellcheck
+# or on Debian/Ubuntu:
+sudo apt-get install shellcheck
+```
+
+Run it from the repo root before committing:
+
+```sh
+make lint                  # shellcheck only
+make check                 # lint + test (the default target)
+```
+
+The same scans run in CI via `.github/workflows/tests.yml`.
+
+## Change policy
+
+Every bug fix and every new feature MUST:
+
+1. Update `tests/` to cover the changed behaviour, and `bats tests/` MUST pass.
+2. Run shellcheck on any modified shell file and address every warning before commit. Suppress with `# shellcheck disable=SC####` only when the warning is a known false positive, and include a comment explaining why.
+
+A change is not done until both the test suite and shellcheck are green.
+
+- New function in `scripts/<name>.sh` → add cases to `tests/<name>.bats`.
+- New external dependency invoked by the scripts → add a programmable stub under `tests/fixtures/bin/` and a loader hook in `tests/test_helper.bash`.
+- Regression fixes → add a failing test first, then make it pass.
+
+CI runs the bats suite on Linux and macOS, and shellcheck on Linux, for every push and pull request via `.github/workflows/tests.yml`.
 
 ## Architecture
 
@@ -38,3 +85,4 @@ The plugin is three bash scripts and one TPM entry point:
 - `format_session_name` strips configured prefixes then replaces `$HOME` with `~`. Session names may contain dots; tmux silently converts them to underscores, so comparisons use `${name//./_}`.
 - Use conventional commits for commit messages
 - Always check if the README.md needs to be updated after a fix or a new feature
+- Never run `git push` (or any other publishing command) on your own. Commit locally when asked, then stop and let the user push.

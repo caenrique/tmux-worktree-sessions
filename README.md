@@ -123,6 +123,19 @@ The plugin is designed around a sibling-directory worktree layout. Given a repo 
 
 When you create a worktree via `Ctrl-W`, the new directory is placed as a sibling of the existing worktrees. Rename (`Ctrl-R`) moves the directory and updates the git linkage automatically.
 
+## Development
+
+Tests live in `tests/` and run under [bats-core](https://github.com/bats-core/bats-core); shell scripts are linted with [shellcheck](https://www.shellcheck.net/). The Makefile wraps both:
+
+```sh
+brew install bats-core shellcheck
+make check       # lint + test (default target)
+make test        # bats only
+make lint        # shellcheck only
+```
+
+Both run on Linux (and bats also on macOS) in CI on every push and pull request. Code changes should keep the suite green and address any shellcheck warnings on touched files.
+
 ## Recency ranking
 
 The picker ranks entries by how recently and frequently you've opened them. Each time you switch to a session, its score increases by 1. Scores decay with a configurable half-life (default: 14 days), so sessions you haven't touched in a while gradually sink below more active ones.
