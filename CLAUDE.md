@@ -31,15 +31,40 @@ TMUX_SESSIONS_ICON_STYLE=nerd \
 bash scripts/sessions.sh
 ```
 
-## Test policy
+## Linting
 
-Every bug fix and every new feature MUST update `tests/` to cover the changed behaviour, and `bats tests/` MUST pass before the change is committed. A change is not done until the test suite is green.
+Shell scripts are linted with [shellcheck](https://www.shellcheck.net/):
+
+```sh
+brew install shellcheck
+# or on Debian/Ubuntu:
+sudo apt-get install shellcheck
+```
+
+Run it from the repo root before committing:
+
+```sh
+shellcheck --severity=warning -x \
+  scripts/*.sh tmux-sessions.tmux \
+  tests/test_helper.bash tests/helpers/*.bash tests/fixtures/bin/*
+```
+
+The same command runs in CI via `.github/workflows/tests.yml`.
+
+## Change policy
+
+Every bug fix and every new feature MUST:
+
+1. Update `tests/` to cover the changed behaviour, and `bats tests/` MUST pass.
+2. Run shellcheck on any modified shell file and address every warning before commit. Suppress with `# shellcheck disable=SC####` only when the warning is a known false positive, and include a comment explaining why.
+
+A change is not done until both the test suite and shellcheck are green.
 
 - New function in `scripts/<name>.sh` → add cases to `tests/<name>.bats`.
 - New external dependency invoked by the scripts → add a programmable stub under `tests/fixtures/bin/` and a loader hook in `tests/test_helper.bash`.
 - Regression fixes → add a failing test first, then make it pass.
 
-CI runs the suite on Linux and macOS for every push and pull request via `.github/workflows/tests.yml`.
+CI runs the bats suite on Linux and macOS, and shellcheck on Linux, for every push and pull request via `.github/workflows/tests.yml`.
 
 ## Architecture
 
