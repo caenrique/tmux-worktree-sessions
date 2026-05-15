@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Session manager invoked by the tmux-sessions key binding.
 # Shows a unified list: running sessions (green, sorted by recency) at the top,
 # followed by projects without a session.  All actions are in a single fzf picker.

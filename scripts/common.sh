@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Shared utilities sourced by sessions.sh and fetch_reload.sh.
 # Also contains all git-worktree helpers so sessions.sh can create
 # worktrees without additional scripts.

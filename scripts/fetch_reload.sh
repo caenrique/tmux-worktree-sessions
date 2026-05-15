@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Background fetch + fzf reload helper invoked by pick_branch in common.sh.
 # Args: $1=repo_path  $2=tmpfile  $3=fzf_port  $4=header_base
 #
