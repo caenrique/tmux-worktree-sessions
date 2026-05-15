@@ -14,10 +14,10 @@ sudo apt-get install bats
 
 `tests/test_helper.bash` ships a minimal portable assertion library, so `bats-support` / `bats-assert` / `bats-file` are not required.
 
-Run the full suite or a single file:
+Run the full suite via the Makefile, or invoke bats directly for finer control:
 
 ```sh
-bats tests/                                    # everything
+make test                                      # full bats suite
 bats tests/common.bats                         # one file
 bats --filter "format_session_name" tests/     # one function
 bats --print-output-on-failure tests/          # show captured output on failure
@@ -44,12 +44,11 @@ sudo apt-get install shellcheck
 Run it from the repo root before committing:
 
 ```sh
-shellcheck --severity=warning -x \
-  scripts/*.sh tmux-sessions.tmux \
-  tests/test_helper.bash tests/helpers/*.bash tests/fixtures/bin/*
+make lint                  # shellcheck only
+make check                 # lint + test (the default target)
 ```
 
-The same command runs in CI via `.github/workflows/tests.yml`.
+The same scans run in CI via `.github/workflows/tests.yml`.
 
 ## Change policy
 

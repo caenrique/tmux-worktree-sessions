@@ -32,26 +32,13 @@ jobs:
         run: brew install tmux fzf
 
       - name: Run bats tests
-        run: bats --print-output-on-failure --recursive tests/
+        run: make test
 
   shellcheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ludeeus/action-shellcheck@2.0.0
-        with:
-          severity: warning
-          scandir: '.'
-          ignore_paths: tests
-          additional_files: 'tmux-sessions.tmux'
-        env:
-          SHELLCHECK_OPTS: -x
-
-      - name: Lint test helpers
-        uses: ludeeus/action-shellcheck@2.0.0
-        with:
-          severity: warning
-          scandir: './tests'
-          ignore_names: '*.bats'
-        env:
-          SHELLCHECK_OPTS: -x
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Run shellcheck
+        run: make lint
