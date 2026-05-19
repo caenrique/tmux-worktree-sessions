@@ -20,12 +20,13 @@ set -uo pipefail
 
 cmd="${1:-}"
 
-# Resolve a single format string against a `name<TAB>id<TAB>path` row.
+# Resolve a single format string against a `name<TAB>id<TAB>path[<TAB>last_attached]` row.
 expand_fmt() {
-  local fmt="$1" name="$2" id="$3" path="$4"
+  local fmt="$1" name="$2" id="$3" path="$4" last_attached="${5:-0}"
   fmt="${fmt//#\{session_name\}/$name}"
   fmt="${fmt//#\{session_id\}/$id}"
   fmt="${fmt//#\{session_path\}/$path}"
+  fmt="${fmt//#\{session_last_attached\}/$last_attached}"
   printf '%s' "$fmt"
 }
 
@@ -34,9 +35,9 @@ case "$cmd" in
     # tmux ls [-F <fmt>]
     fmt="#{session_id}: #{session_name}"
     if [[ "${2:-}" == "-F" ]]; then fmt="$3"; fi
-    while IFS=$'\t' read -r name id path; do
+    while IFS=$'\t' read -r name id path last_attached; do
       [[ -z "$name" ]] && continue
-      expand_fmt "$fmt" "$name" "$id" "$path"
+      expand_fmt "$fmt" "$name" "$id" "$path" "${last_attached:-0}"
       printf '\n'
     done <<<"${TMUX_STUB_SESSIONS:-}"
     ;;
