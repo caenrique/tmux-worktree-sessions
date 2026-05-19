@@ -139,7 +139,7 @@ last_line() {
   assert_line --partial "$proj_name"
 }
 
-@test "build_entries: every emitted line has exactly 3 TSV fields" {
+@test "build_entries: every emitted line has exactly 4 TSV fields" {
   TMUX_SESSIONS_ICON_STYLE=none source_sessions
   mkrepo "$TMUX_SESSIONS_PROJECTS_DIRS/foo"
   stub_tmux_sessions $'alpha\t$1\t/p/alpha'
@@ -150,7 +150,7 @@ last_line() {
   for line in "${lines[@]}"; do
     local fields
     fields=$(awk -F'\t' '{print NF}' <<<"$line")
-    (( fields == 3 )) || { printf 'bad line: %q (fields=%d)\n' "$line" "$fields" >&2; return 1; }
+    (( fields == 4 )) || { printf 'bad line: %q (fields=%d)\n' "$line" "$fields" >&2; return 1; }
   done
 }
 
@@ -162,7 +162,7 @@ last_line() {
   mkworktree "$BATS_TEST_TMPDIR/r" "feature" "$BATS_TEST_TMPDIR/wt/feature"
   stub_tmux_sessions "feature"$'\t$5\t'"$BATS_TEST_TMPDIR/wt/feature"
   local tmpfile="$BATS_TEST_TMPDIR/entries"
-  printf 's\t5\tfeature\np\t/other/proj\tother\n' > "$tmpfile"
+  printf 's\t5\tfeature\tfeature\np\t/other/proj\tother\tother\n' > "$tmpfile"
 
   run _action_ctrl_d "s" "5" "$tmpfile"
   wait
@@ -180,7 +180,7 @@ last_line() {
   mkdir -p "$BATS_TEST_TMPDIR/plain"
   stub_tmux_sessions "plain"$'\t$7\t'"$BATS_TEST_TMPDIR/plain"
   local tmpfile="$BATS_TEST_TMPDIR/entries"
-  printf 's\t7\tplain\np\t/other/proj\tother\n' > "$tmpfile"
+  printf 's\t7\tplain\tplain\np\t/other/proj\tother\tother\n' > "$tmpfile"
 
   run _action_ctrl_d "s" "7" "$tmpfile"
 
@@ -196,7 +196,7 @@ last_line() {
   mkrepo "$BATS_TEST_TMPDIR/r" --remote
   mkworktree "$BATS_TEST_TMPDIR/r" "feature" "$BATS_TEST_TMPDIR/wt/feature"
   local tmpfile="$BATS_TEST_TMPDIR/entries"
-  printf 'p\t%s\tfeature\np\t/other/proj\tother\n' "$BATS_TEST_TMPDIR/wt/feature" > "$tmpfile"
+  printf 'p\t%s\tfeature\tfeature\np\t/other/proj\tother\tother\n' "$BATS_TEST_TMPDIR/wt/feature" > "$tmpfile"
 
   run _action_ctrl_d "p" "$BATS_TEST_TMPDIR/wt/feature" "$tmpfile"
   wait
@@ -213,7 +213,7 @@ last_line() {
   mkdir -p "$BATS_TEST_TMPDIR/wt/orphan"
   stub_fzf_response "Yes"
   local tmpfile="$BATS_TEST_TMPDIR/entries"
-  printf 'p\t%s\torphan\np\t/other\tother\n' "$BATS_TEST_TMPDIR/wt/orphan" > "$tmpfile"
+  printf 'p\t%s\torphan\torphan\np\t/other\tother\tother\n' "$BATS_TEST_TMPDIR/wt/orphan" > "$tmpfile"
 
   run _action_ctrl_d "p" "$BATS_TEST_TMPDIR/wt/orphan" "$tmpfile"
   wait
@@ -229,7 +229,7 @@ last_line() {
   mkdir -p "$BATS_TEST_TMPDIR/wt/orphan"
   stub_fzf_response "No"
   local tmpfile="$BATS_TEST_TMPDIR/entries"
-  printf 'p\t%s\torphan\n' "$BATS_TEST_TMPDIR/wt/orphan" > "$tmpfile"
+  printf 'p\t%s\torphan\torphan\n' "$BATS_TEST_TMPDIR/wt/orphan" > "$tmpfile"
 
   run _action_ctrl_d "p" "$BATS_TEST_TMPDIR/wt/orphan" "$tmpfile"
 
@@ -242,7 +242,7 @@ last_line() {
   TMUX_SESSIONS_ICON_STYLE=none source_sessions
   mkdir -p "$BATS_TEST_TMPDIR/lonely/notes"
   local tmpfile="$BATS_TEST_TMPDIR/entries"
-  printf 'p\t%s\tnotes\n' "$BATS_TEST_TMPDIR/lonely/notes" > "$tmpfile"
+  printf 'p\t%s\tnotes\tnotes\n' "$BATS_TEST_TMPDIR/lonely/notes" > "$tmpfile"
 
   run _action_ctrl_d "p" "$BATS_TEST_TMPDIR/lonely/notes" "$tmpfile"
 
@@ -259,9 +259,9 @@ last_line() {
   stub_tmux_sessions "alpha"$'\t$3\t/p/alpha'
   local tmpfile="$BATS_TEST_TMPDIR/entries"
   {
-    printf 's\t3\talpha\n'
-    printf 'p\t/p/other\tother\n'
-    printf 'n\t\tnew session\n'
+    printf 's\t3\talpha\talpha\n'
+    printf 'p\t/p/other\tother\tother\n'
+    printf 'n\t\tnew session\tnew session\n'
   } > "$tmpfile"
 
   run _action_ctrl_x "s" "3" "$tmpfile"
@@ -269,9 +269,9 @@ last_line() {
   run cat "$tmpfile"
   assert_success
   refute_output --partial $'s\t3\t'
-  [[ "${lines[0]}" == $'p\t/p/other\tother' ]]
-  [[ "${lines[1]}" == $'p\t/p/alpha\talpha' ]]
-  [[ "${lines[2]}" == $'n\t\tnew session' ]]
+  [[ "${lines[0]}" == $'p\t/p/other\tother\tother' ]]
+  [[ "${lines[1]}" == $'p\t/p/alpha\talpha\talpha' ]]
+  [[ "${lines[2]}" == $'n\t\tnew session\tnew session' ]]
   run cat "$TMUX_STUB_LOG"
   assert_line --partial $'kill-session\t-t\t$3'
 }
@@ -279,7 +279,7 @@ last_line() {
 @test "_action_ctrl_x: non-session row is a no-op" {
   TMUX_SESSIONS_ICON_STYLE=none source_sessions
   local tmpfile="$BATS_TEST_TMPDIR/entries"
-  printf 'p\t/p/foo\tfoo\n' > "$tmpfile"
+  printf 'p\t/p/foo\tfoo\tfoo\n' > "$tmpfile"
   local before
   before=$(cat "$tmpfile")
 
@@ -297,7 +297,7 @@ last_line() {
   stub_tmux_sessions "alpha"$'\t$3\t'"$BATS_TEST_TMPDIR/plain"
   stub_fzf_response "shiny new"
   local tmpfile="$BATS_TEST_TMPDIR/entries"
-  printf 's\t3\talpha\n' > "$tmpfile"
+  printf 's\t3\talpha\talpha\n' > "$tmpfile"
 
   run _action_ctrl_r "s" "3" "$tmpfile"
 
@@ -309,7 +309,7 @@ last_line() {
   TMUX_SESSIONS_ICON_STYLE=none source_sessions
   mkdir -p "$BATS_TEST_TMPDIR/plain"
   local tmpfile="$BATS_TEST_TMPDIR/entries"
-  printf 'p\t%s\tplain\n' "$BATS_TEST_TMPDIR/plain" > "$tmpfile"
+  printf 'p\t%s\tplain\tplain\n' "$BATS_TEST_TMPDIR/plain" > "$tmpfile"
 
   run _action_ctrl_r "p" "$BATS_TEST_TMPDIR/plain" "$tmpfile"
 
@@ -339,8 +339,8 @@ last_line() {
   stub_tmux_sessions "alpha"$'\t$5\t/p/alpha'
   local tmpfile="$BATS_TEST_TMPDIR/entries"
   {
-    printf 's\t5\talpha\n'
-    printf 'n\t\tnew session\n'
+    printf 's\t5\talpha\talpha\n'
+    printf 'n\t\tnew session\tnew session\n'
   } > "$tmpfile"
 
   run bash "$PLUGIN_ROOT/scripts/sessions.sh" --action ctrl-x s 5 "$tmpfile"
@@ -361,4 +361,9 @@ last_line() {
   run cat "$FZF_STUB_INVOCATION_LOG"
   assert_line --partial "--tmux"
   assert_line --partial "Sessions > "
+  # fzf must search the clean column (3) and display the decorated column (4)
+  # so session rows aren't penalised for their "(current)/(previous)" suffix
+  # under --scheme=path.
+  assert_line --partial $'--with-nth\t4'
+  assert_line --partial $'--nth\t3'
 }
