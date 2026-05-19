@@ -29,11 +29,20 @@ _GREEN=$'\033[38;2;166;227;161m'
 _YELLOW=$'\033[38;2;249;226;175m'
 _RESET=$'\033[0m'
 
-# Emit the unified 3-field TSV list consumed by manage_sessions.
-# Format: type<TAB>key<TAB>display
-#   s <TAB> stripped_id <TAB> <green>session_name [(current)|(previous)]<reset>
-#   p <TAB> path        <TAB> display_name
-#   n <TAB>             <TAB> display_name
+# Emit the unified 4-field TSV list consumed by manage_sessions.
+# Format: type<TAB>key<TAB>search<TAB>display
+#   - search:  clean fzf-matchable text (no icons, no colours, no
+#              "(current)"/"(previous)" suffix). Sessions land here as their
+#              bare display name so fzf's path scheme doesn't penalise the
+#              decorated form. Projects land here as their format_session_name
+#              path so the path scheme keeps boosting e.g. "playback-service"
+#              over neighbours under "playback-services/".
+#   - display: the rendered row (icon + colour + suffix); fzf is told to
+#              show this column via --with-nth 4.
+#
+#   s <TAB> stripped_id <TAB> session_name <TAB> <green>icon session_name [(current)|(previous)]<reset>
+#   p <TAB> path        <TAB> display_name <TAB> icon display_name
+#   n <TAB>             <TAB> new session  <TAB> icon new session
 build_entries() {
   local current_session prev_session pane_path
   current_session=$(tmux display-message -p '#{session_name}' 2>/dev/null)
@@ -52,7 +61,7 @@ build_entries() {
       curr_path=$(tmux display-message -p -t "$curr_id" '#{session_path}' 2>/dev/null)
       curr_display=$(format_session_name "$curr_path")
       [[ "${curr_display//./_}" != "$current_session" ]] && curr_display="$current_session"
-      printf "s\t%s\t%s%s%s%s (current)%s\n" "${curr_id#\$}" "$_YELLOW" "$_ICON_SESSION" "$_ICON_SEP" "$curr_display" "$_RESET"
+      printf "s\t%s\t%s\t%s%s%s%s (current)%s\n" "${curr_id#\$}" "$curr_display" "$_YELLOW" "$_ICON_SESSION" "$_ICON_SEP" "$curr_display" "$_RESET"
     fi
   fi
 
@@ -65,7 +74,7 @@ build_entries() {
       prev_path=$(tmux display-message -p -t "$prev_id" '#{session_path}' 2>/dev/null)
       prev_display=$(format_session_name "$prev_path")
       [[ "${prev_display//./_}" != "$prev_session" ]] && prev_display="$prev_session"
-      printf "s\t%s\t%s%s%s%s (previous)%s\n" "${prev_id#\$}" "$_GREEN" "$_ICON_SESSION" "$_ICON_SEP" "$prev_display" "$_RESET"
+      printf "s\t%s\t%s\t%s%s%s%s (previous)%s\n" "${prev_id#\$}" "$prev_display" "$_GREEN" "$_ICON_SESSION" "$_ICON_SEP" "$prev_display" "$_RESET"
     fi
   fi
 
@@ -79,7 +88,7 @@ build_entries() {
         raw_id="${raw_id#\$}"
         derived=$(format_session_name "$sess_path")
         [[ "${derived//./_}" != "$name" ]] && derived="$name"
-        printf "s\t%s\t%s%s%s%s%s\n" "$raw_id" "$_GREEN" "$_ICON_SESSION" "$_ICON_SEP" "$derived" "$_RESET"
+        printf "s\t%s\t%s\t%s%s%s%s%s\n" "$raw_id" "$derived" "$_GREEN" "$_ICON_SESSION" "$_ICON_SEP" "$derived" "$_RESET"
       done
 
   # Projects not yet open as sessions, sorted by recency score.
@@ -91,11 +100,11 @@ build_entries() {
       done \
     | sort_by_score "$pane_path" \
     | while IFS=$'\t' read -r name path _; do
-        printf "p\t%s\t%s%s%s\n" "$path" "$_ICON_PROJECT" "$_ICON_SEP" "$name"
+        printf "p\t%s\t%s\t%s%s%s\n" "$path" "$name" "$_ICON_PROJECT" "$_ICON_SEP" "$name"
       done
 
   # New-session sentinel — always last.
-  printf "n\t\t%s%snew session\n" "$_ICON_NEW" "$_ICON_SEP"
+  printf "n\t\tnew session\t%s%snew session\n" "$_ICON_NEW" "$_ICON_SEP"
 }
 
 # ── Action functions ──────────────────────────────────────────────────────────
@@ -170,17 +179,17 @@ _action_ctrl_x() {
   local type="$1" id="$2" tmpfile="$3"
   [[ "$type" != "s" ]] && return
   local tmux_id="\$$id"
-  local sess_path
+  local sess_path clean_name
   sess_path=$(tmux display-message -p -t "$tmux_id" '#{session_path}' 2>/dev/null)
-  local clean_name
-  clean_name=$(strip_ansi "$(grep $'^s\t'"$id"$'\t' "$tmpfile" | cut -f3)")
-  clean_name="${clean_name#${_ICON_SESSION}${_ICON_SEP}}"
-  clean_name="${clean_name% (current)}"
-  clean_name="${clean_name% (previous)}"
+  clean_name=$(grep $'^s\t'"$id"$'\t' "$tmpfile" | cut -f3)
   tmux kill-session -t "$tmux_id" 2>/dev/null
-  NEW_NAME="${_ICON_PROJECT}${_ICON_SEP}${clean_name}" \
+  NEW_SEARCH="$clean_name" \
+  NEW_DISPLAY="${_ICON_PROJECT}${_ICON_SEP}${clean_name}" \
     awk -F'\t' -v OFS='\t' -v id="$id" -v path="$sess_path" '
-      $1=="s" && $2==id { saved = "p\t" path "\t" ENVIRON["NEW_NAME"]; next }
+      $1=="s" && $2==id {
+        saved = "p\t" path "\t" ENVIRON["NEW_SEARCH"] "\t" ENVIRON["NEW_DISPLAY"]
+        next
+      }
       $1=="n" { if (saved != "") { print saved; saved = "" } }
       { print }
       END { if (saved != "") print saved }
@@ -216,10 +225,7 @@ _action_ctrl_r() {
   elif [[ "$type" == "s" ]]; then
     local tmux_id="\$$id"
     local clean_name
-    clean_name=$(strip_ansi "$(grep $'^s\t'"$id"$'\t' "$tmpfile" | cut -f3)")
-    clean_name="${clean_name#${_ICON_SESSION}${_ICON_SEP}}"
-    clean_name="${clean_name% (current)}"
-    clean_name="${clean_name% (previous)}"
+    clean_name=$(grep $'^s\t'"$id"$'\t' "$tmpfile" | cut -f3)
     local rename_output rename_rc rename_key new_name
     rename_output=$(echo "" | fzf $FZF_INLINE \
       --print-query --no-select-1 \
@@ -235,8 +241,9 @@ _action_ctrl_r() {
     [[ -z "$new_name" || "$new_name" == "$clean_name" ]] && return
     tmux rename-session -t "$tmux_id" "$new_name"
     local new_display="${_GREEN}${_ICON_SESSION}${_ICON_SEP}${new_name}${_RESET}"
-    NEW_DISPLAY="$new_display" awk -F'\t' -v OFS='\t' -v id="$id" \
-        '$1=="s" && $2==id { $3=ENVIRON["NEW_DISPLAY"] } { print }' \
+    NEW_SEARCH="$new_name" NEW_DISPLAY="$new_display" \
+      awk -F'\t' -v OFS='\t' -v id="$id" \
+        '$1=="s" && $2==id { $3=ENVIRON["NEW_SEARCH"]; $4=ENVIRON["NEW_DISPLAY"] } { print }' \
         "$tmpfile" > "${tmpfile}.new" && mv "${tmpfile}.new" "$tmpfile"
 
   else
@@ -259,7 +266,8 @@ manage_sessions() {
       cat "$tmpfile" \
       | fzf $FZF_POPUP \
           --ansi \
-          --with-nth 3 \
+          --with-nth 4 \
+          --nth 3 \
           --tiebreak=index \
           --delimiter $'\t' \
           --prompt "Sessions > " \
@@ -279,12 +287,12 @@ manage_sessions() {
     [[ $fzf_rc -eq 130 ]] && return 0  # Esc → close
     [[ -z "$output" ]]    && return 0
 
-    local key line type key2 display
+    local key line type key2 search
     key=$(printf '%s' "$output" | head -1)
     line=$(printf '%s' "$output" | sed -n '2p')
     type=$(printf '%s' "$line" | cut -f1)
     key2=$(printf '%s' "$line" | cut -f2)
-    display=$(printf '%s' "$line" | cut -f3)
+    search=$(printf '%s' "$line" | cut -f3)
 
     [[ "$key" == "ctrl-bs" ]] && return 0
 
@@ -342,9 +350,8 @@ manage_sessions() {
 
     # ── Project row: Enter ────────────────────────────────────────────────────
     if [[ "$type" == "p" ]]; then
-      local clean_display="${display#${_ICON_PROJECT}${_ICON_SEP}}"
-      update_score "$clean_display"
-      switch_or_create_session "$key2" "$clean_display"
+      update_score "$search"
+      switch_or_create_session "$key2" "$search"
       return 0
 
     # ── Session row: Enter ────────────────────────────────────────────────────
