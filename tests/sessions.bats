@@ -109,6 +109,24 @@ last_line() {
   [[ "${lines[1]}" == $'s\t2\t'*"beta"*"(previous)"* ]]
 }
 
+@test "build_entries: remaining sessions ordered by session_last_attached desc" {
+  TMUX_SESSIONS_ICON_STYLE=none source_sessions
+  # current=alpha, previous=beta. The remaining sessions (gamma, delta, epsilon)
+  # carry distinct last_attached timestamps; the picker should list them
+  # newest→oldest after the two pinned rows.
+  stub_tmux_sessions \
+    $'alpha\t$1\t/p/alpha\t1000\nbeta\t$2\t/p/beta\t900\ngamma\t$3\t/p/gamma\t800\ndelta\t$4\t/p/delta\t950\nepsilon\t$5\t/p/epsilon\t850'
+  stub_tmux_current_session "alpha"
+  stub_tmux_prev_session "beta"
+  run build_entries
+  assert_success
+  [[ "${lines[0]}" == $'s\t1\t'*"alpha"*"(current)"* ]]
+  [[ "${lines[1]}" == $'s\t2\t'*"beta"*"(previous)"* ]]
+  [[ "${lines[2]}" == $'s\t4\t'*"delta"* ]]    # last_attached=950
+  [[ "${lines[3]}" == $'s\t5\t'*"epsilon"* ]]  # last_attached=850
+  [[ "${lines[4]}" == $'s\t3\t'*"gamma"* ]]    # last_attached=800
+}
+
 @test "build_entries: project matching an open session is filtered out" {
   TMUX_SESSIONS_ICON_STYLE=none source_sessions
   mkrepo "$TMUX_SESSIONS_PROJECTS_DIRS/foo"

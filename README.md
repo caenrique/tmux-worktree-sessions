@@ -6,8 +6,8 @@ A tmux plugin that gives you a unified fuzzy picker for sessions and git worktre
 
 Press the session key (default `Ctrl+Shift+S`) from anywhere in tmux to open a full-screen picker. The picker shows:
 
-- **Running sessions** at the top, highlighted and sorted by recency. The current session is pinned first; the previous session is pinned second.
-- **Projects** below — git repositories found under your configured project directories, also sorted by recency. Projects already open as sessions are hidden to avoid duplicates.
+- **Running sessions** at the top, highlighted and sorted by most-recently-attached. The current session is pinned first; the previous session is pinned second; the rest follow newest→oldest, so the third entry is the one you used before the previous, and so on.
+- **Projects** below — git repositories found under your configured project directories, sorted by recency score. Projects already open as sessions are hidden to avoid duplicates.
 
 Selecting an entry switches to the session (or creates one if the project isn't open yet). Everything you need to manage your workspace — creating worktrees, renaming branches, deleting sessions — is a keypress away inside the picker.
 
@@ -139,9 +139,11 @@ Both run on Linux (and bats also on macOS) in CI on every push and pull request.
 
 ## Recency ranking
 
-The picker ranks entries by how recently and frequently you've opened them. Each time you switch to a session, its score increases by 1. Scores decay with a configurable half-life (default: 14 days), so sessions you haven't touched in a while gradually sink below more active ones.
+**Running sessions** are ordered by tmux's own `session_last_attached` timestamp. The current session is pinned first, the previous second, and the rest follow newest→oldest. Switching to a session with `Enter` updates this naturally, so the picker always reflects your real attach history.
 
-Entries whose path shares a longer prefix with your current working directory also get a boost (configurable via `@tmux-sessions-score-path-boost`, default `1.0`). At the default values, a same-repo worktree picked at least once in the last month will rank above an unrelated project picked last week, while a project you've picked multiple times this week always stays at the top.
+**Projects** are ranked by how recently *and* frequently you've opened them. Each time you switch to a session for a project, its score increases by 1. Scores decay with a configurable half-life (default: 14 days), so projects you haven't touched in a while gradually sink below more active ones.
+
+Project entries whose path shares a longer prefix with your current working directory also get a boost (configurable via `@tmux-sessions-score-path-boost`, default `1.0`). At the default values, a same-repo worktree picked at least once in the last month will rank above an unrelated project picked last week, while a project you've picked multiple times this week always stays at the top.
 
 ## See also
 

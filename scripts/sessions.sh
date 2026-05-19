@@ -69,19 +69,17 @@ build_entries() {
     fi
   fi
 
-  # Remaining sessions, sorted by recency score.
-  tmux ls -F "#{session_id}"$'\t'"#{session_name}"$'\t'"#{session_path}" 2>/dev/null \
-    | sed 's/^\$//' \
-    | while IFS=$'\t' read -r raw_id name sess_path; do
+  # Remaining sessions, sorted by tmux's session_last_attached (most recent first).
+  # Sessions never attached report 0 and sink to the bottom of this block.
+  tmux ls -F "#{session_last_attached}"$'\t'"#{session_id}"$'\t'"#{session_name}"$'\t'"#{session_path}" 2>/dev/null \
+    | sort -t$'\t' -k1,1nr -s \
+    | while IFS=$'\t' read -r _last_attached raw_id name sess_path; do
         [[ "$name" == "$prev_session" ]] && continue
         [[ "$name" == "$current_session" ]] && continue
+        raw_id="${raw_id#\$}"
         derived=$(format_session_name "$sess_path")
         [[ "${derived//./_}" != "$name" ]] && derived="$name"
-        printf "%s\t%s\t%s\n" "$derived" "$raw_id" "$sess_path"
-      done \
-    | sort_by_score "$pane_path" \
-    | while IFS=$'\t' read -r name raw_id _path; do
-        printf "s\t%s\t%s%s%s%s%s\n" "$raw_id" "$_GREEN" "$_ICON_SESSION" "$_ICON_SEP" "$name" "$_RESET"
+        printf "s\t%s\t%s%s%s%s%s\n" "$raw_id" "$_GREEN" "$_ICON_SESSION" "$_ICON_SEP" "$derived" "$_RESET"
       done
 
   # Projects not yet open as sessions, sorted by recency score.
