@@ -21,7 +21,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import git, score, text
+from . import git, score, text, tmux
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -150,6 +150,29 @@ def build_parser() -> argparse.ArgumentParser:
     rename_worktree_p.add_argument("wt_path", help="current worktree path")
     rename_worktree_p.add_argument("new_name", help="post-prompt sanitised new branch name")
     rename_worktree_p.set_defaults(handler=cmd_git_rename_worktree)
+
+    tmux_p = sub.add_parser("tmux", help="tmux helpers")
+    tmux_sub = tmux_p.add_subparsers(dest="tmux_command", metavar="<subcommand>")
+
+    session_id_p = tmux_sub.add_parser(
+        "session-id",
+        help="print the tmux session id ($N) for an exact session name",
+    )
+    session_id_p.add_argument("name", help="session name (dots are normalised to underscores)")
+    session_id_p.set_defaults(handler=cmd_tmux_session_id)
+
+    switch_or_create_p = tmux_sub.add_parser(
+        "switch-or-create",
+        help="switch to a session or create it first",
+    )
+    switch_or_create_p.add_argument("path", help="working directory for the session")
+    switch_or_create_p.add_argument(
+        "name",
+        nargs="?",
+        default="",
+        help="session name; defaults to format-session-name(path)",
+    )
+    switch_or_create_p.set_defaults(handler=cmd_tmux_switch_or_create)
 
     return parser
 
@@ -315,6 +338,24 @@ def cmd_git_rename_worktree(args: argparse.Namespace) -> int:
         return 1
     sys.stdout.write(str(new_path))
     sys.stdout.write("\n")
+    return 0
+
+
+def cmd_tmux_session_id(args: argparse.Namespace) -> int:
+    sid = tmux.session_id(args.name)
+    if sid is not None:
+        sys.stdout.write(sid)
+        sys.stdout.write("\n")
+    return 0
+
+
+def cmd_tmux_switch_or_create(args: argparse.Namespace) -> int:
+    name = args.name
+    if not name:
+        home = os.environ.get("HOME", "")
+        strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
+        name = text.format_session_name(args.path, home=home, strip_prefixes=strip_prefixes)
+    tmux.switch_or_create(Path(args.path), name)
     return 0
 
 

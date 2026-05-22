@@ -81,16 +81,7 @@ format_session_name() {
 
 # Return the tmux session ID ($N) for a session with the given exact name.
 # Returns an empty string if no matching session exists.
-#
-# Uses 'tmux ls' with awk exact-match to avoid tmux's '/' parsing (which
-# interprets a slash as the session:window separator in -t targets).
-# tmux silently replaces '.' with '_' when storing session names, so the
-# lookup uses the same substitution.
-get_session_id() {
-  local session_name="${1//./_}"
-  tmux ls -F "#{session_name}"$'\t'"#{session_id}" 2>/dev/null \
-    | awk -F'\t' -v n="$session_name" '$1 == n { print $2 }'
-}
+get_session_id() { _tmux_sessions_py tmux session-id "$1"; }
 
 # Switch to (or create) a tmux session for the given directory.
 #
@@ -98,22 +89,9 @@ get_session_id() {
 #   $1  session_path  — working directory for the new or existing session
 #   $2  session_name  — (optional) explicit session name; derived from $1 via
 #                       format_session_name when omitted
-#
-# All targeting uses session IDs rather than names so that '/' inside names is
-# never misread as the tmux session:window separator.
 switch_or_create_session() {
-  local session_path="$1"
-  local session_name="${2:-$(format_session_name "$1")}"
-
-  local session_id
-  session_id=$(get_session_id "$session_name")
-
-  if [[ -z "$session_id" ]]; then
-    session_id=$(tmux new-session -c "$session_path" -s "$session_name" -d \
-      -P -F '#{session_id}')
-  fi
-
-  tmux switch-client -t "$session_id"
+  TMUX_SESSIONS_STRIP_PREFIXES="${TMUX_SESSIONS_STRIP_PREFIXES:-}" \
+    _tmux_sessions_py tmux switch-or-create "$1" "${2:-}"
 }
 
 # Increment the pick score for a session name, decaying the stored value first.

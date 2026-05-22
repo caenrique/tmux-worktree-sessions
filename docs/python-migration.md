@@ -253,7 +253,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
 
 ## Phase 3 — tmux + interactive helpers
 
-### Step 15 — `get_session_id`, `switch_or_create_session` `[ ]`
+### Step 15 — `get_session_id`, `switch_or_create_session` `[x]`
 
 - Pure: `tmux.session_id(name: str) -> str | None` and
   `tmux.switch_or_create(path: Path, name: str) -> None` in

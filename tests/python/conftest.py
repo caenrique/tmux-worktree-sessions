@@ -8,11 +8,16 @@ helpers in :mod:`tmux_sessions.git` can be exercised end-to-end.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_TMUX_STUB_DIR = _REPO_ROOT / "tests" / "fixtures" / "bin"
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -71,5 +76,36 @@ def make_repo(tmp_path: Path) -> Callable[..., Path]:
             _git(repo, "remote", "set-head", "origin", "main")
 
         return repo
+
+    return _factory
+
+
+@dataclass
+class TmuxStub:
+    """Handle to a primed tmux stub on PATH for the duration of a test."""
+
+    log: Path
+
+    def invocations(self) -> list[list[str]]:
+        if not self.log.exists():
+            return []
+        return [line.split("\t") for line in self.log.read_text().splitlines() if line]
+
+
+@pytest.fixture
+def tmux_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., TmuxStub]:
+    """Prepend the bats tmux stub to PATH and prime its env-driven state."""
+
+    def _factory(
+        *,
+        sessions: str = "",
+        new_id: str = "$99",
+    ) -> TmuxStub:
+        log = tmp_path / "tmux_stub.log"
+        monkeypatch.setenv("PATH", f"{_TMUX_STUB_DIR}:{os.environ['PATH']}")
+        monkeypatch.setenv("TMUX_STUB_LOG", str(log))
+        monkeypatch.setenv("TMUX_STUB_SESSIONS", sessions)
+        monkeypatch.setenv("TMUX_STUB_NEW_ID", new_id)
+        return TmuxStub(log=log)
 
     return _factory
