@@ -193,7 +193,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
 - Replace the two bash helpers. Pytest parity using real tmpdir repos
   (the same `mkrepo` strategy as bats).
 
-### Step 9 — `list_branches` `[ ]`
+### Step 9 — `list_branches` `[x]`
 
 - Pure: `git.list_branches(repo: Path) -> list[str]`.
 - CLI: `cmd_git_list_branches` (passthrough).

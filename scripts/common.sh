@@ -198,25 +198,7 @@ get_default_branch() { _tmux_sessions_py git default-branch "$1"; }
 # List branches available for a new worktree checkout.
 # Outputs local branch names first, then remote-only branches prefixed with
 # "origin/" so the user can distinguish them.
-list_branches() {
-  local repo_path="$1"
-  local remote
-  remote=$(_resolve_remote "$repo_path")
-  local local_branches remote_branches remote_only
-
-  local_branches=$(git -C "$repo_path" branch --format '%(refname:short)')
-  remote_branches=$(git -C "$repo_path" branch -r --format '%(refname:short)' \
-    | grep "^$remote/" \
-    | grep -v "^$remote/HEAD$")
-
-  remote_only=$(comm -23 \
-    <(printf '%s\n' "$remote_branches" | sed "s|^$remote/||" | sort) \
-    <(printf '%s\n' "$local_branches"  | sort) \
-    | sed "s|^|$remote/|")
-
-  { printf '%s\n' "$local_branches"; printf '%s\n' "$remote_only"; } \
-    | grep -v '^$'
-}
+list_branches() { _tmux_sessions_py git list-branches "$1"; }
 
 # Convert a branch name to a safe directory name.
 #   /       → -   (feature/login → feature-login)

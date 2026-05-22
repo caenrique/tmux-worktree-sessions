@@ -94,6 +94,13 @@ def build_parser() -> argparse.ArgumentParser:
     default_branch_p.add_argument("repo", help="path to the git repo")
     default_branch_p.set_defaults(handler=cmd_git_default_branch)
 
+    list_branches_p = git_sub.add_parser(
+        "list-branches",
+        help="print local branches then remote-only branches with <remote>/ prefix",
+    )
+    list_branches_p.add_argument("repo", help="path to the git repo")
+    list_branches_p.set_defaults(handler=cmd_git_list_branches)
+
     return parser
 
 
@@ -175,6 +182,13 @@ def cmd_git_resolve_remote(args: argparse.Namespace) -> int:
 def cmd_git_default_branch(args: argparse.Namespace) -> int:
     branch = git.default_branch(Path(args.repo))
     if branch is not None:
+        sys.stdout.write(branch)
+        sys.stdout.write("\n")
+    return 0
+
+
+def cmd_git_list_branches(args: argparse.Namespace) -> int:
+    for branch in git.list_branches(Path(args.repo)):
         sys.stdout.write(branch)
         sys.stdout.write("\n")
     return 0

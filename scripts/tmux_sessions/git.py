@@ -63,3 +63,29 @@ def default_branch(repo: Path) -> str | None:
     if not ref:
         return None
     return ref.rsplit("/", 1)[-1]
+
+
+def list_branches(repo: Path) -> list[str]:
+    """Return local branches followed by remote-only branches.
+
+    Remote-only branches are prefixed with ``<remote>/`` and listed
+    in sorted order; the remote ``HEAD`` ref is excluded. When ``repo``
+    has no remote, only local branches are returned. Local branch order
+    matches ``git branch`` output (alphabetical by default).
+    """
+    local_result = _git(repo, "branch", "--format", "%(refname:short)")
+    local = [line for line in local_result.stdout.splitlines() if line]
+
+    remote = resolve_remote(repo)
+    if remote is None:
+        return local
+
+    remote_result = _git(repo, "branch", "-r", "--format", "%(refname:short)")
+    prefix = f"{remote}/"
+    head_ref = f"{prefix}HEAD"
+    remote_branches = [
+        line for line in remote_result.stdout.splitlines() if line.startswith(prefix) and line != head_ref
+    ]
+    local_set = set(local)
+    remote_only = sorted(r for r in remote_branches if r[len(prefix) :] not in local_set)
+    return local + remote_only

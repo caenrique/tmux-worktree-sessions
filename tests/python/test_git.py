@@ -12,7 +12,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from tmux_sessions.git import branch_to_dir, default_branch, resolve_remote
+from tmux_sessions.git import branch_to_dir, default_branch, list_branches, resolve_remote
 
 
 def test_branch_to_dir_replaces_slashes_with_dashes() -> None:
@@ -69,3 +69,52 @@ def test_default_branch_returns_none_when_remote_head_unset(
 ) -> None:
     repo = make_repo("r")
     assert default_branch(repo) is None
+
+
+def test_list_branches_local_plus_remote_only_with_origin_prefix(
+    make_repo: Callable[..., Path],
+) -> None:
+    repo = make_repo("r", branches=("main", "feature"), with_remote=True)
+    main_sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "main"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "update-ref",
+            "refs/remotes/origin/server-only",
+            main_sha,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    branches = list_branches(repo)
+
+    assert "main" in branches
+    assert "feature" in branches
+    assert "origin/server-only" in branches
+
+
+def test_list_branches_local_tracking_remote_not_duplicated(
+    make_repo: Callable[..., Path],
+) -> None:
+    repo = make_repo("r", with_remote=True)
+    branches = list_branches(repo)
+    assert branches.count("main") == 1
+
+
+def test_list_branches_no_remote_returns_only_local(
+    make_repo: Callable[..., Path],
+) -> None:
+    repo = make_repo("r", branches=("main", "feature"))
+    branches = list_branches(repo)
+    assert "main" in branches
+    assert "feature" in branches
+    assert not any(b.startswith("origin/") for b in branches)
