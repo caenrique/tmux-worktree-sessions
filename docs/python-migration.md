@@ -199,7 +199,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
 - CLI: `cmd_git_list_branches` (passthrough).
 - Replace bash. Pytest parity.
 
-### Step 10 — `list_worktrees` `[ ]`
+### Step 10 — `list_worktrees` `[x]`
 
 - Pure: `git.list_worktrees(repo: Path) -> list[Worktree]` (dataclass
   with `path: Path`, `branch: str`).

@@ -207,23 +207,7 @@ branch_to_dir() { _tmux_sessions_py git branch-to-dir "$1"; }
 
 # List the worktrees belonging to the same repo as $repo_path.
 # Outputs one "path<TAB>branch" line per worktree.
-list_worktrees() {
-  local repo_path="$1"
-  git -C "$repo_path" worktree list --porcelain | awk '
-    /^worktree /  { path = $2; branch = "" }
-    /^branch /    { branch = $2; sub("refs/heads/", "", branch) }
-    /^detached$/  { branch = "(detached)" }
-    /^$/ {
-      if (path != "") {
-        print path "\t" (branch ? branch : "(detached)")
-        path = ""
-      }
-    }
-    END {
-      if (path != "") print path "\t" (branch ? branch : "(detached)")
-    }
-  '
-}
+list_worktrees() { _tmux_sessions_py git list-worktrees "$1"; }
 
 # Create a git worktree under $container for the given branch or new name.
 # All git output is redirected to stderr so stdout stays clean for callers.

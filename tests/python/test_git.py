@@ -12,7 +12,13 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from tmux_sessions.git import branch_to_dir, default_branch, list_branches, resolve_remote
+from tmux_sessions.git import (
+    branch_to_dir,
+    default_branch,
+    list_branches,
+    list_worktrees,
+    resolve_remote,
+)
 
 
 def test_branch_to_dir_replaces_slashes_with_dashes() -> None:
@@ -118,3 +124,44 @@ def test_list_branches_no_remote_returns_only_local(
     assert "main" in branches
     assert "feature" in branches
     assert not any(b.startswith("origin/") for b in branches)
+
+
+def test_list_worktrees_main_only(make_repo: Callable[..., Path]) -> None:
+    repo = make_repo("r")
+    worktrees = list_worktrees(repo)
+    assert len(worktrees) == 1
+    assert worktrees[0].branch == "main"
+    assert worktrees[0].path == repo
+
+
+def test_list_worktrees_lists_multiple(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r")
+    feature_path = tmp_path / "feature"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(feature_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    branches = {wt.branch for wt in list_worktrees(repo)}
+    assert "main" in branches
+    assert "feature" in branches
+
+
+def test_list_worktrees_marks_detached_head(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r")
+    sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    det_path = tmp_path / "det"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "--detach", str(det_path), sha],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    branches = [wt.branch for wt in list_worktrees(repo)]
+    assert "(detached)" in branches

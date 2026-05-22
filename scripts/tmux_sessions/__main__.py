@@ -101,6 +101,13 @@ def build_parser() -> argparse.ArgumentParser:
     list_branches_p.add_argument("repo", help="path to the git repo")
     list_branches_p.set_defaults(handler=cmd_git_list_branches)
 
+    list_worktrees_p = git_sub.add_parser(
+        "list-worktrees",
+        help="print one path<TAB>branch line per worktree",
+    )
+    list_worktrees_p.add_argument("repo", help="path to the git repo")
+    list_worktrees_p.set_defaults(handler=cmd_git_list_worktrees)
+
     return parser
 
 
@@ -191,6 +198,12 @@ def cmd_git_list_branches(args: argparse.Namespace) -> int:
     for branch in git.list_branches(Path(args.repo)):
         sys.stdout.write(branch)
         sys.stdout.write("\n")
+    return 0
+
+
+def cmd_git_list_worktrees(args: argparse.Namespace) -> int:
+    for wt in git.list_worktrees(Path(args.repo)):
+        sys.stdout.write(f"{wt.path}\t{wt.branch}\n")
     return 0
 
 

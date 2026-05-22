@@ -9,6 +9,7 @@ and live here per the migration plan.
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -89,3 +90,54 @@ def list_branches(repo: Path) -> list[str]:
     local_set = set(local)
     remote_only = sorted(r for r in remote_branches if r[len(prefix) :] not in local_set)
     return local + remote_only
+
+
+@dataclass(frozen=True)
+class Worktree:
+    """A git worktree: filesystem path and the branch it has checked out.
+
+    ``branch`` is the bare branch name (no ``refs/heads/`` prefix).
+    Detached worktrees use the literal string ``"(detached)"``, matching
+    the bash awk pipeline this dataclass replaced.
+    """
+
+    path: Path
+    branch: str
+
+
+def list_worktrees(repo: Path) -> list[Worktree]:
+    """Parse ``git worktree list --porcelain`` into ``Worktree`` rows.
+
+    Detached worktrees are reported with ``branch == "(detached)"`` so
+    callers can render the column without a special case.
+    """
+    result = _git(repo, "worktree", "list", "--porcelain")
+    if result.returncode != 0:
+        return []
+
+    worktrees: list[Worktree] = []
+    path: str | None = None
+    branch = ""
+
+    def _flush() -> None:
+        nonlocal path, branch
+        if path is not None:
+            worktrees.append(Worktree(Path(path), branch or "(detached)"))
+            path = None
+            branch = ""
+
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            _flush()
+            path = line[len("worktree ") :]
+            branch = ""
+        elif line.startswith("branch "):
+            ref = line[len("branch ") :]
+            heads_prefix = "refs/heads/"
+            branch = ref[len(heads_prefix) :] if ref.startswith(heads_prefix) else ref
+        elif line == "detached":
+            branch = "(detached)"
+        elif line == "":
+            _flush()
+    _flush()
+    return worktrees
