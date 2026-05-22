@@ -189,23 +189,11 @@ list_git_projects() {
 
 # Return the remote to use for a repo: "origin" if configured, otherwise the
 # first remote listed by git remote.  Returns empty if no remotes exist.
-_resolve_remote() {
-  local remotes
-  remotes=$(git -C "$1" remote 2>/dev/null) || return
-  [[ -z "$remotes" ]] && return
-  printf '%s\n' "$remotes" | grep -qx 'origin' && echo 'origin' \
-    || printf '%s\n' "$remotes" | head -1
-}
+_resolve_remote() { _tmux_sessions_py git resolve-remote "$1"; }
 
 # Return the name of the default remote branch (e.g. "main" or "master").
 # Reads refs/remotes/<remote>/HEAD, which git sets after 'git remote set-head'.
-get_default_branch() {
-  local remote
-  remote=$(_resolve_remote "$1")
-  [[ -z "$remote" ]] && return
-  git -C "$1" symbolic-ref "refs/remotes/$remote/HEAD" 2>/dev/null \
-    | sed 's|.*/||'
-}
+get_default_branch() { _tmux_sessions_py git default-branch "$1"; }
 
 # List branches available for a new worktree checkout.
 # Outputs local branch names first, then remote-only branches prefixed with

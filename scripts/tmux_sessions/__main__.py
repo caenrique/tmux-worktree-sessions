@@ -80,6 +80,20 @@ def build_parser() -> argparse.ArgumentParser:
     branch_to_dir_p.add_argument("name", help="branch name")
     branch_to_dir_p.set_defaults(handler=cmd_git_branch_to_dir)
 
+    resolve_remote_p = git_sub.add_parser(
+        "resolve-remote",
+        help="print 'origin' if configured, else the first listed remote",
+    )
+    resolve_remote_p.add_argument("repo", help="path to the git repo")
+    resolve_remote_p.set_defaults(handler=cmd_git_resolve_remote)
+
+    default_branch_p = git_sub.add_parser(
+        "default-branch",
+        help="print the default remote branch name (e.g. main)",
+    )
+    default_branch_p.add_argument("repo", help="path to the git repo")
+    default_branch_p.set_defaults(handler=cmd_git_default_branch)
+
     return parser
 
 
@@ -147,6 +161,22 @@ def cmd_text_sanitize_name(args: argparse.Namespace) -> int:
 
 def cmd_git_branch_to_dir(args: argparse.Namespace) -> int:
     sys.stdout.write(git.branch_to_dir(args.name))
+    return 0
+
+
+def cmd_git_resolve_remote(args: argparse.Namespace) -> int:
+    remote = git.resolve_remote(Path(args.repo))
+    if remote is not None:
+        sys.stdout.write(remote)
+        sys.stdout.write("\n")
+    return 0
+
+
+def cmd_git_default_branch(args: argparse.Namespace) -> int:
+    branch = git.default_branch(Path(args.repo))
+    if branch is not None:
+        sys.stdout.write(branch)
+        sys.stdout.write("\n")
     return 0
 
 

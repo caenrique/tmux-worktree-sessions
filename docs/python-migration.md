@@ -183,7 +183,7 @@ return types (`dataclass`es, `list[Branch]`, etc.). Subprocess calls
 take `repo: Path` as an explicit parameter, so they live in the pure
 layer; CLI handlers in `__main__.py` are one-line passthroughs.
 
-### Step 8 — `_resolve_remote` and `get_default_branch` `[ ]`
+### Step 8 — `_resolve_remote` and `get_default_branch` `[x]`
 
 - Pure: `git.resolve_remote(repo: Path) -> str | None` and
   `git.default_branch(repo: Path) -> str | None` — both shell out to
