@@ -148,7 +148,7 @@ unchanged.
 - CLI: `cmd_git_branch_to_dir` registers `git branch-to-dir`.
 - Replace bash. Pytest parity.
 
-### Step 6 — `format_session_name` `[ ]`
+### Step 6 — `format_session_name` `[x]`
 
 - Pure: `text.format_session_name(path: str, *, home: str,
   strip_prefixes: list[str]) -> str`. Both kwargs required — no env

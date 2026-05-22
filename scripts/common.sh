@@ -75,25 +75,8 @@ sanitize_name() { _tmux_sessions_py text sanitize-name "$1"; }
 # Dots are kept as-is.  All tmux operations use session IDs ($N) rather than
 # names as targets, so dots are safe.
 format_session_name() {
-  local session_name="$1"
-
-  # Strip longest-matching configured prefix first.
-  local prefix
-  for prefix in ${TMUX_SESSIONS_STRIP_PREFIXES:-}; do
-    prefix="${prefix/#\~/$HOME}"
-    if [[ "$session_name" == "$prefix/"* ]]; then
-      session_name="${session_name#$prefix/}"
-      break
-    fi
-  done
-
-  # Replace the home directory path with a tilde. Done with prefix-strip + concat
-  # rather than ${var/#$HOME/~}: bash 5 tilde-expands the replacement, undoing the
-  # substitution on Linux while working "by accident" on bash 3.2 (macOS).
-  if [[ "$session_name" == "$HOME" || "$session_name" == "$HOME"/* ]]; then
-    session_name="~${session_name#"$HOME"}"
-  fi
-  echo "$session_name"
+  TMUX_SESSIONS_STRIP_PREFIXES="${TMUX_SESSIONS_STRIP_PREFIXES:-}" \
+    _tmux_sessions_py text format-session-name "$1"
 }
 
 # Return the tmux session ID ($N) for a session with the given exact name.

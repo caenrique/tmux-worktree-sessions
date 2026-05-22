@@ -56,6 +56,13 @@ def build_parser() -> argparse.ArgumentParser:
     sanitize_p.add_argument("text", help="input string")
     sanitize_p.set_defaults(handler=cmd_text_sanitize_name)
 
+    fsn_p = text_sub.add_parser(
+        "format-session-name",
+        help="derive a short session name from a filesystem path",
+    )
+    fsn_p.add_argument("path", help="filesystem path")
+    fsn_p.set_defaults(handler=cmd_text_format_session_name)
+
     git_p = sub.add_parser("git", help="git helpers")
     git_sub = git_p.add_subparsers(dest="git_command", metavar="<subcommand>")
 
@@ -112,6 +119,13 @@ def cmd_text_sanitize_name(args: argparse.Namespace) -> int:
 
 def cmd_git_branch_to_dir(args: argparse.Namespace) -> int:
     sys.stdout.write(git.branch_to_dir(args.name))
+    return 0
+
+
+def cmd_text_format_session_name(args: argparse.Namespace) -> int:
+    home = os.environ.get("HOME", "")
+    strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
+    sys.stdout.write(text.format_session_name(args.path, home=home, strip_prefixes=strip_prefixes))
     return 0
 
 
