@@ -213,42 +213,8 @@ list_worktrees() { _tmux_sessions_py git list-worktrees "$1"; }
 # All git output is redirected to stderr so stdout stays clean for callers.
 # Returns the new (or existing) worktree path on stdout.
 add_worktree() {
-  local repo_path="$1"
-  local container="$2"
-  local branch="$3"    # existing branch (may be "origin/foo" for remote-only)
-  local new_name="$4"  # new branch name (mutually exclusive with $branch)
-  local remote
-  remote=$(_resolve_remote "$repo_path")
-
-  local dir_name worktree_path default_branch
-
-  if [[ -n "$new_name" ]]; then
-    dir_name=$(branch_to_dir "$new_name")
-    worktree_path="$container/$dir_name"
-    default_branch=$(get_default_branch "$repo_path")
-    default_branch="${default_branch:-${TMUX_SESSIONS_DEFAULT_BRANCH:-main}}"
-    git -C "$repo_path" worktree add \
-      -b "$new_name" "$worktree_path" "$remote/${default_branch}" >&2 \
-      || return 1
-  else
-    local local_branch="${branch#$remote/}"
-    local existing_path
-    existing_path=$(list_worktrees "$repo_path" \
-      | awk -F'\t' -v b="$local_branch" '$2 == b { print $1; exit }')
-    if [[ -n "$existing_path" ]]; then
-      echo "$existing_path"
-      return 0
-    fi
-    dir_name=$(branch_to_dir "$local_branch")
-    worktree_path="$container/$dir_name"
-    if [[ "$branch" == $remote/* ]]; then
-      git -C "$repo_path" worktree add -b "$local_branch" "$worktree_path" "$branch" >&2 || return 1
-    else
-      git -C "$repo_path" worktree add "$worktree_path" "$branch" >&2 || return 1
-    fi
-  fi
-
-  echo "$worktree_path"
+  TMUX_SESSIONS_DEFAULT_BRANCH="${TMUX_SESSIONS_DEFAULT_BRANCH:-main}" \
+    _tmux_sessions_py git add-worktree "$1" "$2" "$3" "$4"
 }
 
 # Rename a worktree: renames the git branch, moves the directory, repairs the

@@ -141,3 +141,86 @@ def list_worktrees(repo: Path) -> list[Worktree]:
             _flush()
     _flush()
     return worktrees
+
+
+def add_worktree(
+    repo: Path,
+    container: Path,
+    *,
+    branch: str | None,
+    new_name: str | None,
+    default_branch_fallback: str,
+) -> Path:
+    """Create or reuse a worktree under ``container``.
+
+    Exactly one of ``branch`` (existing branch, possibly remote-prefixed
+    like ``origin/foo``) or ``new_name`` (a brand-new branch off the
+    default branch) should be supplied. Returns the worktree path.
+
+    When ``new_name`` is set, the new branch is created from
+    ``<remote>/<default>`` if the repo has a remote, falling back to
+    ``default_branch_fallback`` (usually ``main``) when the remote
+    HEAD is unset. When ``branch`` is set and a worktree already has
+    that branch checked out, the existing path is returned unchanged.
+    Remote-only branches (``<remote>/foo``) are checked out as a new
+    local branch ``foo`` that tracks the remote.
+
+    Git's progress messages stream to the caller's stderr; git's
+    stdout is dropped so the returned path stays clean.
+    """
+    remote = resolve_remote(repo)
+
+    if new_name:
+        dir_name = branch_to_dir(new_name)
+        worktree_path = container / dir_name
+        resolved_default = default_branch(repo) or default_branch_fallback
+        base_ref = f"{remote}/{resolved_default}" if remote is not None else resolved_default
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "worktree",
+                "add",
+                "-b",
+                new_name,
+                str(worktree_path),
+                base_ref,
+            ],
+            stdout=subprocess.DEVNULL,
+            check=True,
+        )
+        return worktree_path
+
+    if branch is None:
+        raise ValueError("add_worktree requires either branch or new_name")
+
+    if remote is not None and branch.startswith(f"{remote}/"):
+        local_branch = branch[len(remote) + 1 :]
+        is_remote_only = True
+    else:
+        local_branch = branch
+        is_remote_only = False
+
+    for wt in list_worktrees(repo):
+        if wt.branch == local_branch:
+            return wt.path
+
+    dir_name = branch_to_dir(local_branch)
+    worktree_path = container / dir_name
+    if is_remote_only:
+        cmd = [
+            "git",
+            "-C",
+            str(repo),
+            "worktree",
+            "add",
+            "-b",
+            local_branch,
+            str(worktree_path),
+            branch,
+        ]
+    else:
+        cmd = ["git", "-C", str(repo), "worktree", "add", str(worktree_path), branch]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, check=True)
+    return worktree_path

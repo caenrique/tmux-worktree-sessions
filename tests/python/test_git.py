@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from tmux_sessions.git import (
+    add_worktree,
     branch_to_dir,
     default_branch,
     list_branches,
@@ -146,6 +147,114 @@ def test_list_worktrees_lists_multiple(make_repo: Callable[..., Path], tmp_path:
     branches = {wt.branch for wt in list_worktrees(repo)}
     assert "main" in branches
     assert "feature" in branches
+
+
+def test_add_worktree_creates_new_branch_from_remote_default(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r", with_remote=True)
+    container = tmp_path / "container"
+    container.mkdir()
+
+    path = add_worktree(
+        repo,
+        container,
+        branch=None,
+        new_name="shiny",
+        default_branch_fallback="main",
+    )
+
+    assert path == container / "shiny"
+    assert path.is_dir()
+    head = subprocess.run(
+        ["git", "-C", str(path), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head == "shiny"
+
+
+def test_add_worktree_checks_out_existing_local_branch(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r", branches=("main", "feature"), with_remote=True)
+    container = tmp_path / "container"
+    container.mkdir()
+
+    path = add_worktree(
+        repo,
+        container,
+        branch="feature",
+        new_name=None,
+        default_branch_fallback="main",
+    )
+
+    assert path == container / "feature"
+    assert path.is_dir()
+
+
+def test_add_worktree_returns_existing_path_when_branch_already_checked_out(
+    make_repo: Callable[..., Path], tmp_path: Path
+) -> None:
+    repo = make_repo("r", branches=("main", "feature"), with_remote=True)
+    container = tmp_path / "container"
+    container.mkdir()
+    existing = container / "feature"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", str(existing), "feature"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    path = add_worktree(
+        repo,
+        container,
+        branch="feature",
+        new_name=None,
+        default_branch_fallback="main",
+    )
+
+    assert path == existing
+
+
+def test_add_worktree_remote_only_creates_tracking_branch(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r", with_remote=True)
+    main_sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "main"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "update-ref",
+            "refs/remotes/origin/remote-only",
+            main_sha,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    container = tmp_path / "container"
+    container.mkdir()
+
+    path = add_worktree(
+        repo,
+        container,
+        branch="origin/remote-only",
+        new_name=None,
+        default_branch_fallback="main",
+    )
+
+    assert path == container / "remote-only"
+    head = subprocess.run(
+        ["git", "-C", str(path), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head == "remote-only"
 
 
 def test_list_worktrees_marks_detached_head(make_repo: Callable[..., Path], tmp_path: Path) -> None:

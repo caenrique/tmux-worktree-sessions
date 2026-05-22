@@ -207,7 +207,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
   for shell consumers.
 - Replace bash. Pytest parity.
 
-### Step 11 — `add_worktree` `[ ]`
+### Step 11 — `add_worktree` `[x]`
 
 - Pure: `git.add_worktree(repo: Path, container: Path, branch:
   str | None, new_name: str | None) -> Path`.

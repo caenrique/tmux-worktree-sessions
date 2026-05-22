@@ -108,6 +108,22 @@ def build_parser() -> argparse.ArgumentParser:
     list_worktrees_p.add_argument("repo", help="path to the git repo")
     list_worktrees_p.set_defaults(handler=cmd_git_list_worktrees)
 
+    add_worktree_p = git_sub.add_parser(
+        "add-worktree",
+        help="create or reuse a worktree; print its path",
+    )
+    add_worktree_p.add_argument("repo", help="path to the git repo")
+    add_worktree_p.add_argument("container", help="directory under which to create the worktree")
+    add_worktree_p.add_argument(
+        "branch",
+        help="existing branch (may be <remote>/<name>); empty string to create a new branch",
+    )
+    add_worktree_p.add_argument(
+        "new_name",
+        help="new branch name to create; empty string when reusing an existing branch",
+    )
+    add_worktree_p.set_defaults(handler=cmd_git_add_worktree)
+
     return parser
 
 
@@ -204,6 +220,20 @@ def cmd_git_list_branches(args: argparse.Namespace) -> int:
 def cmd_git_list_worktrees(args: argparse.Namespace) -> int:
     for wt in git.list_worktrees(Path(args.repo)):
         sys.stdout.write(f"{wt.path}\t{wt.branch}\n")
+    return 0
+
+
+def cmd_git_add_worktree(args: argparse.Namespace) -> int:
+    fallback = os.environ.get("TMUX_SESSIONS_DEFAULT_BRANCH") or "main"
+    path = git.add_worktree(
+        Path(args.repo),
+        Path(args.container),
+        branch=args.branch or None,
+        new_name=args.new_name or None,
+        default_branch_fallback=fallback,
+    )
+    sys.stdout.write(str(path))
+    sys.stdout.write("\n")
     return 0
 
 
