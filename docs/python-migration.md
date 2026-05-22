@@ -126,7 +126,7 @@ implementation in a domain module, registers a CLI subcommand in
 dispatcher call. Tests gain parallel pytest coverage; bats coverage is
 unchanged.
 
-### Step 3 — `strip_ansi` `[ ]`
+### Step 3 — `strip_ansi` `[x]`
 
 - Pure: `text.strip_ansi(s: str) -> str` in
   `scripts/tmux_sessions/text.py`.

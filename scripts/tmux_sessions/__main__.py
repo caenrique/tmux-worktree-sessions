@@ -20,7 +20,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import score
+from . import score, text
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,6 +41,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="path used for the path-similarity boost; empty disables",
     )
     sort_p.set_defaults(handler=cmd_score_sort)
+
+    text_p = sub.add_parser("text", help="text utilities")
+    text_sub = text_p.add_subparsers(dest="text_command", metavar="<subcommand>")
+
+    strip_p = text_sub.add_parser("strip-ansi", help="strip ANSI SGR escape sequences")
+    strip_p.add_argument("text", help="input string")
+    strip_p.set_defaults(handler=cmd_text_strip_ansi)
 
     return parser
 
@@ -73,6 +80,11 @@ def cmd_score_sort(args: argparse.Namespace) -> int:
     for line in ranked:
         sys.stdout.write(line)
         sys.stdout.write("\n")
+    return 0
+
+
+def cmd_text_strip_ansi(args: argparse.Namespace) -> int:
+    sys.stdout.write(text.strip_ansi(args.text))
     return 0
 
 

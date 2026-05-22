@@ -49,10 +49,18 @@ SCORE_FILE="${TMUX_SESSIONS_SCORES_FILE:-$HOME/.local/share/tmux-sessions/scores
 # regardless of how common.sh was sourced.
 _PLUGIN_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Run `python3 -m tmux_sessions <args>` with PYTHONPATH set so the
+# in-tree package is importable regardless of how the plugin was
+# installed.
+_tmux_sessions_py() {
+  PYTHONPATH="$_PLUGIN_SCRIPTS_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m tmux_sessions "$@"
+}
+
 # ── String utilities ──────────────────────────────────────────────────────────
 
 # Strip ANSI colour escape sequences from a string.
-strip_ansi() { printf '%s' "$1" | sed $'s/\033\\[[0-9;]*m//g'; }
+strip_ansi() { _tmux_sessions_py text strip-ansi "$1"; }
 
 # Trim leading/trailing whitespace and replace internal spaces with dashes.
 # Used to normalise user-entered branch and session names.
@@ -172,8 +180,7 @@ sort_by_score() {
   SCORE_FILE="$SCORE_FILE" \
   TMUX_SESSIONS_SCORE_HALF_LIFE="${TMUX_SESSIONS_SCORE_HALF_LIFE:-14}" \
   TMUX_SESSIONS_SCORE_PATH_BOOST="${TMUX_SESSIONS_SCORE_PATH_BOOST:-1.0}" \
-  PYTHONPATH="$_PLUGIN_SCRIPTS_DIR${PYTHONPATH:+:$PYTHONPATH}" \
-    python3 -m tmux_sessions score sort "${1:-}"
+    _tmux_sessions_py score sort "${1:-}"
 }
 
 # ── Project discovery ─────────────────────────────────────────────────────────
