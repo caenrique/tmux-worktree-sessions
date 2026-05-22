@@ -7,7 +7,15 @@ exercise the bash shim end-to-end; the CLI handler is covered by
 
 from __future__ import annotations
 
-from tmux_sessions.score import current_scores, parse_score_table, sort_rows
+import math
+
+from tmux_sessions.score import (
+    current_scores,
+    format_score_table,
+    merge_score,
+    parse_score_table,
+    sort_rows,
+)
 
 NOW = 1_700_000_000.0
 HALF_LIFE_SECS = 14 * 24 * 3600
@@ -76,3 +84,47 @@ def test_parse_score_table_skips_invalid_rows() -> None:
     rows = parse_score_table(text)
 
     assert rows == [("alpha", 1.0, 100.0), ("gamma", 2.0, 300.0)]
+
+
+def test_merge_score_appends_fresh_entry() -> None:
+    out = merge_score([], name="alpha", now=NOW, half_life_secs=HALF_LIFE_SECS)
+
+    assert out == [("alpha", 1.0, NOW)]
+
+
+def test_merge_score_decays_existing_entry_in_place() -> None:
+    one_half_life_ago = NOW - HALF_LIFE_SECS
+    out = merge_score(
+        [("alpha", 4.0, one_half_life_ago)],
+        name="alpha",
+        now=NOW,
+        half_life_secs=HALF_LIFE_SECS,
+    )
+
+    assert len(out) == 1
+    name, score, ts = out[0]
+    assert name == "alpha"
+    assert ts == NOW
+    assert math.isclose(score, 3.0, abs_tol=0.01)  # 4 * 0.5 + 1 = 3
+
+
+def test_merge_score_preserves_other_entries() -> None:
+    out = merge_score(
+        [("alpha", 5.0, NOW), ("gamma", 2.0, NOW)],
+        name="beta",
+        now=NOW,
+        half_life_secs=HALF_LIFE_SECS,
+    )
+
+    names = [n for n, _, _ in out]
+    assert names == ["alpha", "gamma", "beta"]
+
+
+def test_format_score_table_integer_floats_render_without_decimal() -> None:
+    rendered = format_score_table([("alpha", 1.0, 1700000000.0)])
+
+    assert rendered == "alpha\t1\t1700000000\n"
+
+
+def test_format_score_table_empty_input_returns_empty() -> None:
+    assert format_score_table([]) == ""

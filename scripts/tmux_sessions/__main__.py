@@ -42,6 +42,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sort_p.set_defaults(handler=cmd_score_sort)
 
+    update_p = score_sub.add_parser(
+        "update",
+        help="increment the pick score for a session name",
+    )
+    update_p.add_argument("name", help="session name whose score to bump")
+    update_p.set_defaults(handler=cmd_score_update)
+
     text_p = sub.add_parser("text", help="text utilities")
     text_sub = text_p.add_subparsers(dest="text_command", metavar="<subcommand>")
 
@@ -104,6 +111,27 @@ def cmd_score_sort(args: argparse.Namespace) -> int:
     for line in ranked:
         sys.stdout.write(line)
         sys.stdout.write("\n")
+    return 0
+
+
+def cmd_score_update(args: argparse.Namespace) -> int:
+    score_file = Path(os.environ.get("SCORE_FILE", ""))
+    half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
+    half_life_secs = half_life_days * 24 * 3600
+    now = float(int(time.time()))
+
+    score_file.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        text_in = score_file.read_text()
+    except FileNotFoundError:
+        text_in = ""
+
+    entries = score.parse_score_table(text_in)
+    new_entries = score.merge_score(entries, name=args.name, now=now, half_life_secs=half_life_secs)
+
+    tmp = score_file.with_name(score_file.name + ".tmp")
+    tmp.write_text(score.format_score_table(new_entries))
+    tmp.replace(score_file)
     return 0
 
 

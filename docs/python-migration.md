@@ -159,7 +159,7 @@ unchanged.
 - Replace bash. Pytest parity in pure tests including:
   longest-prefix-strip, `$HOME`→`~`, no-match fallthrough.
 
-### Step 7 — Score writer `update_score` `[ ]`
+### Step 7 — Score writer `update_score` `[x]`
 
 - Pure: `score.merge_score(entries: list[tuple[str, float, float]], *,
   name: str, now: float, half_life_secs: float) ->

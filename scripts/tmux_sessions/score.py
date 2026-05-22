@@ -61,6 +61,49 @@ def current_scores(
     return scores
 
 
+def merge_score(
+    entries: list[tuple[str, float, float]],
+    *,
+    name: str,
+    now: float,
+    half_life_secs: float,
+) -> list[tuple[str, float, float]]:
+    """Return ``entries`` with ``name``'s score decayed and incremented by 1.
+
+    If ``name`` already has a row, replace it in place with
+    ``base * exp(-ln2 * elapsed / half_life_secs) + 1`` and timestamp
+    ``now``. Otherwise append ``(name, 1.0, now)``.
+    """
+    out: list[tuple[str, float, float]] = []
+    found = False
+    for entry_name, base, ts in entries:
+        if entry_name == name:
+            elapsed = max(0.0, now - ts)
+            decay = math.exp(-math.log(2) * elapsed / half_life_secs)
+            out.append((name, base * decay + 1.0, now))
+            found = True
+        else:
+            out.append((entry_name, base, ts))
+    if not found:
+        out.append((name, 1.0, now))
+    return out
+
+
+def _format_number(x: float) -> str:
+    """Match awk's ``print`` formatting: integer-valued floats print as int."""
+    if x == int(x):
+        return str(int(x))
+    return f"{x:.6g}"
+
+
+def format_score_table(entries: list[tuple[str, float, float]]) -> str:
+    """Serialize score entries to ``name<TAB>score<TAB>ts\\n`` rows."""
+    if not entries:
+        return ""
+    lines = [f"{name}\t{_format_number(score)}\t{_format_number(ts)}" for name, score, ts in entries]
+    return "\n".join(lines) + "\n"
+
+
 def sort_rows(
     lines: Iterable[str],
     *,

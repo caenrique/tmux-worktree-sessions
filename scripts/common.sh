@@ -126,30 +126,9 @@ switch_or_create_session() {
 #
 # Storage: $SCORE_FILE — tab-separated columns: session_name, score, unix_ts
 update_score() {
-  local session_name="$1"
-  local now half_life
-  now=$(date +%s)
-  half_life=$(( ${TMUX_SESSIONS_SCORE_HALF_LIFE:-14} * 24 * 3600 ))
-
-  mkdir -p "$(dirname "$SCORE_FILE")"
-  [[ -f "$SCORE_FILE" ]] || touch "$SCORE_FILE"
-
-  local tmp
-  tmp=$(mktemp)
-
-  awk -F'\t' -v OFS='\t' \
-      -v name="$session_name" -v now="$now" -v hl="$half_life" '
-    $1 == name {
-      elapsed = now - ($3 + 0)
-      if (elapsed < 0) elapsed = 0
-      decay = exp(-0.693147 * elapsed / hl)
-      print $1, ($2 + 0) * decay + 1, now
-      found = 1
-      next
-    }
-    { print }
-    END { if (!found) print name, 1, now }
-  ' "$SCORE_FILE" > "$tmp" && mv "$tmp" "$SCORE_FILE"
+  SCORE_FILE="$SCORE_FILE" \
+  TMUX_SESSIONS_SCORE_HALF_LIFE="${TMUX_SESSIONS_SCORE_HALF_LIFE:-14}" \
+    _tmux_sessions_py score update "$1"
 }
 
 # Read "session_name<TAB>rest..." lines from stdin, sort them by current pick

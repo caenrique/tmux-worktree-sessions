@@ -69,3 +69,27 @@ def test_cli_missing_score_file_treats_all_as_zero(monkeypatch: pytest.MonkeyPat
     )
 
     assert len(out.splitlines()) == 2
+
+
+def test_cli_score_update_creates_fresh_file_with_score_one(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    score_file = tmp_path / "scores.tsv"
+    monkeypatch.setenv("SCORE_FILE", str(score_file))
+    monkeypatch.setenv("TMUX_SESSIONS_SCORE_HALF_LIFE", "14")
+
+    rc = main(["score", "update", "alpha"])
+    assert rc == 0
+
+    contents = score_file.read_text()
+    assert contents.startswith("alpha\t1\t")
+
+
+def test_cli_score_update_creates_parent_directory_when_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    score_file = tmp_path / "nested" / "dir" / "scores.tsv"
+    monkeypatch.setenv("SCORE_FILE", str(score_file))
+    monkeypatch.setenv("TMUX_SESSIONS_SCORE_HALF_LIFE", "14")
+
+    rc = main(["score", "update", "alpha"])
+    assert rc == 0
+    assert score_file.is_file()
