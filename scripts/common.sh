@@ -154,35 +154,10 @@ sort_by_score() {
 # Uses fd when available; falls back to find.
 # Controlled by TMUX_SESSIONS_PROJECTS_DIRS and TMUX_SESSIONS_MAX_DEPTH.
 list_git_projects() {
-  local _max_depth="${TMUX_SESSIONS_MAX_DEPTH:-6}"
-  local _dirs=()
-  local _d
-  for _d in ${TMUX_SESSIONS_PROJECTS_DIRS:-$HOME/Projects}; do
-    _d="${_d/#\~/$HOME}"
-    [[ -d "$_d" ]] && _dirs+=("$_d")
-  done
-
-  [[ ${#_dirs[@]} -eq 0 ]] && return
-
-  if command -v fd &>/dev/null; then
-    fd \
-      -H "^.git$" -td -tf \
-      --max-depth="$_max_depth" \
-      --prune \
-      --format "{//}" \
-      -E node_modules \
-      "${_dirs[@]}"
-  else
-    for _d in "${_dirs[@]}"; do
-      find "$_d" -maxdepth "$_max_depth" \
-        \( -name "node_modules" -prune \) -o \
-        \( -name ".git" -print \) 2>/dev/null \
-        | sed 's|/\.git$||'
-    done
-  fi \
-  | while IFS= read -r path; do
-      printf "%s\t%s\n" "$(format_session_name "$path")" "$path"
-    done
+  TMUX_SESSIONS_PROJECTS_DIRS="${TMUX_SESSIONS_PROJECTS_DIRS:-$HOME/Projects}" \
+  TMUX_SESSIONS_MAX_DEPTH="${TMUX_SESSIONS_MAX_DEPTH:-6}" \
+  TMUX_SESSIONS_STRIP_PREFIXES="${TMUX_SESSIONS_STRIP_PREFIXES:-}" \
+    _tmux_sessions_py git list-projects
 }
 
 # ── Git worktree helpers ──────────────────────────────────────────────────────

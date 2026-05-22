@@ -17,7 +17,7 @@ Selecting an entry switches to the session (or creates one if the project isn't 
 - [git](https://git-scm.com)
 - [fzf](https://github.com/junegunn/fzf)
 - [python](https://www.python.org) ≥ 3.8 *(for recency-score sorting)*
-- [fd](https://github.com/sharkdp/fd) *(optional — falls back to `find` if not installed)*
+- [fd](https://github.com/sharkdp/fd)
 - [curl](https://curl.se) *(for the live fetch-and-reload animation in the branch picker)*
 
 ## Installation

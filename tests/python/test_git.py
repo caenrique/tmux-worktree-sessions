@@ -19,6 +19,7 @@ from tmux_sessions.git import (
     default_branch,
     fetch_is_stale,
     list_branches,
+    list_git_projects,
     list_worktrees,
     rename_worktree,
     resolve_remote,
@@ -361,3 +362,66 @@ def test_rename_worktree_destination_exists_raises(make_repo: Callable[..., Path
         rename_worktree(repo, container, feature_path, new_name="renamed")
 
     assert feature_path.is_dir()  # rollback: original worktree untouched
+
+
+def test_list_git_projects_finds_repos_directly_under_root(
+    make_repo: Callable[..., Path],
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "Projects"
+    root.mkdir()
+    foo = make_repo("Projects/foo")
+    bar = make_repo("Projects/bar")
+
+    projects = list_git_projects([root], max_depth=6)
+
+    assert set(projects) == {foo, bar}
+
+
+def test_list_git_projects_skips_missing_roots(tmp_path: Path) -> None:
+    missing = tmp_path / "does-not-exist"
+    assert list_git_projects([missing], max_depth=6) == []
+
+
+def test_list_git_projects_excludes_node_modules(
+    make_repo: Callable[..., Path],
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "Projects"
+    root.mkdir()
+    nm = root / "node_modules" / "pkg"
+    nm.mkdir(parents=True)
+    (nm / ".git").mkdir()
+    real = make_repo("Projects/real")
+
+    projects = list_git_projects([root], max_depth=6)
+
+    assert projects == [real]
+
+
+def test_list_git_projects_treats_dotgit_file_as_project(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "Projects"
+    repo = root / "linked"
+    repo.mkdir(parents=True)
+    (repo / ".git").write_text("gitdir: ../some/path\n")  # worktree-style .git file
+
+    projects = list_git_projects([root], max_depth=6)
+
+    assert projects == [repo]
+
+
+def test_list_git_projects_respects_max_depth(
+    make_repo: Callable[..., Path],
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "Projects"
+    root.mkdir()
+    deep = make_repo("Projects/a/b/c/deep")
+
+    found_shallow = list_git_projects([root], max_depth=2)
+    found_deep = list_git_projects([root], max_depth=6)
+
+    assert deep not in found_shallow
+    assert deep in found_deep

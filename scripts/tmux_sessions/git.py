@@ -13,6 +13,49 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def list_git_projects(roots: list[Path], *, max_depth: int) -> list[Path]:
+    """Return paths of directories that contain ``.git`` under any root.
+
+    Shells out to ``fd``, which is a hard runtime dependency of the
+    plugin. ``fd`` matches ``.git`` as either a directory (regular
+    checkout) or a file (linked worktree), prunes ``node_modules``
+    subtrees, and stops descending into a found repo. ``max_depth``
+    bounds how deep below each root the search descends.
+
+    Roots that do not exist or are not directories are silently skipped.
+    """
+    existing = [r for r in roots if r.is_dir()]
+    if not existing:
+        return []
+    cmd = [
+        "fd",
+        "--hidden",  # search hidden entries; .git starts with a dot
+        "^.git$",  # match exactly the basename '.git'
+        "--type",
+        "directory",  # match regular checkouts (.git as a dir)
+        "--type",
+        "file",  # also match linked worktrees (.git as a file)
+        f"--max-depth={max_depth}",  # bound the descent depth
+        "--prune",  # don't descend into a directory once it matches
+        "--format",
+        "{//}",  # print the parent dir (the repo) instead of the .git entry
+        "--exclude",
+        "node_modules",  # skip noisy dependency trees
+        *(str(r) for r in existing),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    seen: set[Path] = set()
+    projects: list[Path] = []
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+        path = Path(line)
+        if path not in seen:
+            seen.add(path)
+            projects.append(path)
+    return projects
+
+
 def fetch_is_stale(mtime: float | None, *, now: float, window_secs: int = 900) -> bool:
     """Return True when a fetch should run.
 

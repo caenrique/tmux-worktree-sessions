@@ -23,13 +23,15 @@ jobs:
           file-install: false
           detik-install: false
 
-      - name: Install tmux and fzf (Linux)
+      - name: Install tmux, fzf, and fd (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y tmux fzf
+        run: |
+          sudo apt-get update && sudo apt-get install -y tmux fzf fd-find
+          sudo ln -sf "$(command -v fdfind)" /usr/local/bin/fd
 
-      - name: Install tmux and fzf (macOS)
+      - name: Install tmux, fzf, and fd (macOS)
         if: runner.os == 'macOS'
-        run: brew install tmux fzf
+        run: brew install tmux fzf fd
 
       - name: Run bats tests
         run: make test
@@ -47,6 +49,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Install fd (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y fd-find
+          sudo ln -sf "$(command -v fdfind)" /usr/local/bin/fd
+
+      - name: Install fd (macOS)
+        if: runner.os == 'macOS'
+        run: brew install fd
 
       - name: Install Python dev dependencies
         run: pip install pytest pytest-mock ruff mypy

@@ -236,15 +236,16 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
 - No GNU/BSD `stat` divergence. Pytest parity (missing FETCH_HEAD,
   fresh, > 15 min old) covered in pure tests.
 
-### Step 14 — `list_git_projects` `[ ]`
+### Step 14 — `list_git_projects` `[x]`
 
-- Pure: `git.list_git_projects(roots: list[Path], max_depth: int) ->
-  list[Project]` using `os.walk` (no fd/find shellout, simpler in
-  Python). Drop the fd/find branching entirely. `os.walk` belongs in
-  the pure layer because every input is an explicit parameter.
+- Pure: `git.list_git_projects(roots: list[Path], *, max_depth: int) ->
+  list[Path]` shells out to `fd`. `fd` becomes a hard runtime
+  dependency of the plugin (no Python `os.walk` fallback) so we keep
+  one fast, well-tested traversal across bash and Python and we don't
+  carry a slower second implementation.
 - CLI: `cmd_git_list_projects` reads `TMUX_SESSIONS_PROJECTS_DIRS` and
   `TMUX_SESSIONS_MAX_DEPTH` from env, expands `~`, calls the pure
-  function, prints TSV.
+  function, prints TSV. README and CI install `fd` unconditionally.
 - Replace bash. Pytest parity. Update bats `list_projects` test if the
   output format changes meaningfully (it should not).
 

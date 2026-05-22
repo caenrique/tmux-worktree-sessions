@@ -125,6 +125,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_worktree_p.set_defaults(handler=cmd_git_add_worktree)
 
+    list_projects_p = git_sub.add_parser(
+        "list-projects",
+        help="emit session_name<TAB>path for each git project under the configured roots",
+    )
+    list_projects_p.set_defaults(handler=cmd_git_list_projects)
+
     fetch_is_stale_p = git_sub.add_parser(
         "fetch-is-stale",
         help="exit 0 if FETCH_HEAD is missing or older than --window seconds",
@@ -255,6 +261,23 @@ def cmd_git_add_worktree(args: argparse.Namespace) -> int:
     )
     sys.stdout.write(str(path))
     sys.stdout.write("\n")
+    return 0
+
+
+def cmd_git_list_projects(args: argparse.Namespace) -> int:
+    home = os.environ.get("HOME", "")
+    raw_dirs = os.environ.get("TMUX_SESSIONS_PROJECTS_DIRS") or f"{home}/Projects"
+    max_depth = int(os.environ.get("TMUX_SESSIONS_MAX_DEPTH") or 6)
+    strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
+
+    roots: list[Path] = []
+    for entry in raw_dirs.split():
+        expanded = entry.replace("~", home, 1) if entry.startswith("~") else entry
+        roots.append(Path(expanded))
+
+    for project in git.list_git_projects(roots, max_depth=max_depth):
+        name = text.format_session_name(str(project), home=home, strip_prefixes=strip_prefixes)
+        sys.stdout.write(f"{name}\t{project}\n")
     return 0
 
 
