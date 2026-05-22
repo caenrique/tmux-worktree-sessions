@@ -49,6 +49,13 @@ def build_parser() -> argparse.ArgumentParser:
     strip_p.add_argument("text", help="input string")
     strip_p.set_defaults(handler=cmd_text_strip_ansi)
 
+    sanitize_p = text_sub.add_parser(
+        "sanitize-name",
+        help="trim whitespace and replace internal whitespace with dashes",
+    )
+    sanitize_p.add_argument("text", help="input string")
+    sanitize_p.set_defaults(handler=cmd_text_sanitize_name)
+
     return parser
 
 
@@ -85,6 +92,11 @@ def cmd_score_sort(args: argparse.Namespace) -> int:
 
 def cmd_text_strip_ansi(args: argparse.Namespace) -> int:
     sys.stdout.write(text.strip_ansi(args.text))
+    return 0
+
+
+def cmd_text_sanitize_name(args: argparse.Namespace) -> int:
+    sys.stdout.write(text.sanitize_name(args.text))
     return 0
 
 

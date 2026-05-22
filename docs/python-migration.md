@@ -135,7 +135,7 @@ unchanged.
 - Replace `strip_ansi()` in `common.sh` with a dispatcher call.
 - Add `tests/python/test_text.py` covering the same cases as bats.
 
-### Step 4 — `sanitize_name` `[ ]`
+### Step 4 — `sanitize_name` `[x]`
 
 - Pure: `text.sanitize_name(s: str) -> str`.
 - CLI: `cmd_text_sanitize_name` registers `text sanitize-name`.

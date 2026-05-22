@@ -64,7 +64,7 @@ strip_ansi() { _tmux_sessions_py text strip-ansi "$1"; }
 
 # Trim leading/trailing whitespace and replace internal spaces with dashes.
 # Used to normalise user-entered branch and session names.
-sanitize_name() { printf '%s' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/[[:space:]]/-/g'; }
+sanitize_name() { _tmux_sessions_py text sanitize-name "$1"; }
 
 # Derive a short tmux session name from a filesystem path.
 #
