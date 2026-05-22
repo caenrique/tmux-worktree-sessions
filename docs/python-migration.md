@@ -141,7 +141,7 @@ unchanged.
 - CLI: `cmd_text_sanitize_name` registers `text sanitize-name`.
 - Replace bash function. Pytest parity with bats cases.
 
-### Step 5 — `branch_to_dir` `[ ]`
+### Step 5 — `branch_to_dir` `[x]`
 
 - Pure: `git.branch_to_dir(name: str) -> str` in a new
   `scripts/tmux_sessions/git.py` (seed for git helpers).

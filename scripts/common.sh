@@ -271,10 +271,7 @@ list_branches() {
 # Convert a branch name to a safe directory name.
 #   /       → -   (feature/login → feature-login)
 #   (space) → -
-branch_to_dir() {
-  local name="${1//\//-}"
-  echo "${name// /-}"
-}
+branch_to_dir() { _tmux_sessions_py git branch-to-dir "$1"; }
 
 # List the worktrees belonging to the same repo as $repo_path.
 # Outputs one "path<TAB>branch" line per worktree.

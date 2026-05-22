@@ -20,7 +20,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import score, text
+from . import git, score, text
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,6 +55,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sanitize_p.add_argument("text", help="input string")
     sanitize_p.set_defaults(handler=cmd_text_sanitize_name)
+
+    git_p = sub.add_parser("git", help="git helpers")
+    git_sub = git_p.add_subparsers(dest="git_command", metavar="<subcommand>")
+
+    branch_to_dir_p = git_sub.add_parser(
+        "branch-to-dir",
+        help="convert a branch name to a safe directory name",
+    )
+    branch_to_dir_p.add_argument("name", help="branch name")
+    branch_to_dir_p.set_defaults(handler=cmd_git_branch_to_dir)
 
     return parser
 
@@ -97,6 +107,11 @@ def cmd_text_strip_ansi(args: argparse.Namespace) -> int:
 
 def cmd_text_sanitize_name(args: argparse.Namespace) -> int:
     sys.stdout.write(text.sanitize_name(args.text))
+    return 0
+
+
+def cmd_git_branch_to_dir(args: argparse.Namespace) -> int:
+    sys.stdout.write(git.branch_to_dir(args.name))
     return 0
 
 
