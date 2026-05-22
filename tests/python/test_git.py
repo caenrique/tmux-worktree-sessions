@@ -17,11 +17,32 @@ from tmux_sessions.git import (
     add_worktree,
     branch_to_dir,
     default_branch,
+    fetch_is_stale,
     list_branches,
     list_worktrees,
     rename_worktree,
     resolve_remote,
 )
+
+
+def test_fetch_is_stale_missing_mtime_is_stale() -> None:
+    assert fetch_is_stale(None, now=1_000_000.0) is True
+
+
+def test_fetch_is_stale_fresh_is_not_stale() -> None:
+    now = 1_000_000.0
+    assert fetch_is_stale(now - 60.0, now=now) is False
+
+
+def test_fetch_is_stale_older_than_window_is_stale() -> None:
+    now = 1_000_000.0
+    assert fetch_is_stale(now - 901.0, now=now) is True
+
+
+def test_fetch_is_stale_custom_window() -> None:
+    now = 1_000_000.0
+    assert fetch_is_stale(now - 30.0, now=now, window_secs=10) is True
+    assert fetch_is_stale(now - 5.0, now=now, window_secs=10) is False
 
 
 def test_branch_to_dir_replaces_slashes_with_dashes() -> None:

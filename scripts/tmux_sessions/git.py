@@ -13,6 +13,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def fetch_is_stale(mtime: float | None, *, now: float, window_secs: int = 900) -> bool:
+    """Return True when a fetch should run.
+
+    ``mtime`` is the FETCH_HEAD modification time (seconds since the epoch),
+    or ``None`` when the file does not exist or its mtime cannot be read.
+    A missing/unreadable mtime is treated as stale so a fresh fetch runs.
+    """
+    if mtime is None:
+        return True
+    return (now - mtime) > window_secs
+
+
 def branch_to_dir(name: str) -> str:
     """Convert a branch name to a safe directory name.
 

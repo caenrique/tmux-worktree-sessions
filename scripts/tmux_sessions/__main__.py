@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 import time
 from collections.abc import Sequence
@@ -123,6 +124,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="new branch name to create; empty string when reusing an existing branch",
     )
     add_worktree_p.set_defaults(handler=cmd_git_add_worktree)
+
+    fetch_is_stale_p = git_sub.add_parser(
+        "fetch-is-stale",
+        help="exit 0 if FETCH_HEAD is missing or older than --window seconds",
+    )
+    fetch_is_stale_p.add_argument("repo", help="path to the git repo")
+    fetch_is_stale_p.add_argument(
+        "--window", type=int, default=900, help="staleness threshold in seconds (default 900)"
+    )
+    fetch_is_stale_p.set_defaults(handler=cmd_git_fetch_is_stale)
 
     rename_worktree_p = git_sub.add_parser(
         "rename-worktree",
@@ -245,6 +256,27 @@ def cmd_git_add_worktree(args: argparse.Namespace) -> int:
     sys.stdout.write(str(path))
     sys.stdout.write("\n")
     return 0
+
+
+def cmd_git_fetch_is_stale(args: argparse.Namespace) -> int:
+    repo = Path(args.repo)
+    common_dir_result = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+    )
+    if common_dir_result.returncode != 0:
+        return 0
+    common_dir = Path(common_dir_result.stdout.strip())
+    if not common_dir.is_absolute():
+        common_dir = repo / common_dir
+    fetch_head = common_dir / "FETCH_HEAD"
+    try:
+        mtime: float | None = fetch_head.stat().st_mtime
+    except FileNotFoundError:
+        mtime = None
+    stale = git.fetch_is_stale(mtime, now=time.time(), window_secs=args.window)
+    return 0 if stale else 1
 
 
 def cmd_git_rename_worktree(args: argparse.Namespace) -> int:

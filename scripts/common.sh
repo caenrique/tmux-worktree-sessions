@@ -276,24 +276,7 @@ _gen_branch_picker_entries() {
 
 # Return 0 if git fetch should run (FETCH_HEAD missing or >15 min old).
 # Uses --git-common-dir so the check works correctly from inside linked worktrees.
-_fetch_is_stale() {
-  local repo_path="$1"
-  local window=900  # 15 minutes
-  local git_common fetch_head mtime now
-  git_common=$(git -C "$repo_path" rev-parse --git-common-dir 2>/dev/null) || return 0
-  [[ "$git_common" != /* ]] && git_common="$repo_path/$git_common"
-  fetch_head="$git_common/FETCH_HEAD"
-  [[ -f "$fetch_head" ]] || return 0
-  # GNU stat -f means --file-system (multi-line output); BSD stat -f means --format.
-  # Branch on uname so the wrong flag never gets a chance to "succeed".
-  case "$(uname -s)" in
-    Darwin|*BSD) mtime=$(stat -f %m "$fetch_head" 2>/dev/null) ;;
-    *)           mtime=$(stat -c %Y "$fetch_head" 2>/dev/null) ;;
-  esac
-  [[ -z "$mtime" ]] && return 0
-  now=$(date +%s)
-  (( now - mtime > window ))
-}
+_fetch_is_stale() { _tmux_sessions_py git fetch-is-stale "$1"; }
 
 # Interactively pick a branch for a new worktree.
 # Returns "new:<name>" or "existing:<branch>" on stdout with exit 0.

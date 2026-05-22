@@ -224,7 +224,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
 - Replace the post-prompt half of the bash function. Pytest parity for
   the git/move/repair logic.
 
-### Step 13 — `_fetch_is_stale` `[ ]`
+### Step 13 — `_fetch_is_stale` `[x]`
 
 - Pure: `git.fetch_is_stale(mtime: float | None, *, now: float,
   window_secs: int = 900) -> bool`. The pure function takes the mtime
