@@ -215,7 +215,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
 - Replace bash. Pytest parity covering the four bash branches (new
   branch, existing local, already checked out, remote-only tracking).
 
-### Step 12 — `rename_worktree` `[ ]`
+### Step 12 — `rename_worktree` `[x]`
 
 - Pure: `git.rename_worktree(...)` — does the git/move/repair logic.
 - CLI: `cmd_git_rename_worktree` (passthrough); the interactive fzf

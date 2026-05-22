@@ -12,12 +12,14 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
 from tmux_sessions.git import (
     add_worktree,
     branch_to_dir,
     default_branch,
     list_branches,
     list_worktrees,
+    rename_worktree,
     resolve_remote,
 )
 
@@ -274,3 +276,67 @@ def test_list_worktrees_marks_detached_head(make_repo: Callable[..., Path], tmp_
     )
     branches = [wt.branch for wt in list_worktrees(repo)]
     assert "(detached)" in branches
+
+
+def test_rename_worktree_renames_branch_moves_dir_and_repairs(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r", branches=("main", "feature"))
+    container = tmp_path
+    feature_path = container / "feature"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", str(feature_path), "feature"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    new_path = rename_worktree(repo, container, feature_path, new_name="renamed-feature")
+
+    assert new_path == container / "renamed-feature"
+    assert new_path.is_dir()
+    assert not feature_path.exists()
+    head = subprocess.run(
+        ["git", "-C", str(new_path), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head == "renamed-feature"
+
+
+def test_rename_worktree_detached_head_raises(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r")
+    sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    det_path = tmp_path / "det"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "--detach", str(det_path), sha],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    with pytest.raises(RuntimeError, match="detached HEAD"):
+        rename_worktree(repo, tmp_path, det_path, new_name="anything")
+
+
+def test_rename_worktree_destination_exists_raises(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r", branches=("main", "feature"))
+    container = tmp_path
+    feature_path = container / "feature"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", str(feature_path), "feature"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    blocker = container / "renamed"
+    blocker.mkdir()
+
+    with pytest.raises(RuntimeError, match="Destination already exists"):
+        rename_worktree(repo, container, feature_path, new_name="renamed")
+
+    assert feature_path.is_dir()  # rollback: original worktree untouched

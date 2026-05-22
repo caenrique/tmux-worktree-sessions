@@ -224,3 +224,59 @@ def add_worktree(
         cmd = ["git", "-C", str(repo), "worktree", "add", str(worktree_path), branch]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, check=True)
     return worktree_path
+
+
+def rename_worktree(
+    repo: Path,
+    container: Path,
+    wt_path: Path,
+    *,
+    new_name: str,
+) -> Path:
+    """Rename a worktree's branch, move the directory, and repair linkage.
+
+    Returns the new worktree path. Raises ``RuntimeError`` for the user-
+    facing failure modes (detached HEAD, destination exists, branch
+    rename or filesystem move failed) so the CLI can map them to
+    ``stderr`` plus exit 1.
+
+    The interactive fzf prompt that picks ``new_name`` lives in bash;
+    this function only owns the post-prompt git/move/repair half of
+    the operation.
+    """
+    show = subprocess.run(
+        ["git", "-C", str(wt_path), "branch", "--show-current"],
+        capture_output=True,
+        text=True,
+    )
+    old_branch = show.stdout.strip() if show.returncode == 0 else ""
+    if not old_branch:
+        raise RuntimeError("Cannot rename: worktree is in detached HEAD state")
+
+    new_dir = branch_to_dir(new_name)
+    new_wt_path = container / new_dir
+    if new_wt_path.exists():
+        raise RuntimeError(f"Destination already exists: {new_wt_path}")
+
+    rename_rc = subprocess.run(
+        ["git", "-C", str(wt_path), "branch", "-m", old_branch, new_name],
+        stdout=subprocess.DEVNULL,
+    ).returncode
+    if rename_rc != 0:
+        raise RuntimeError(f"git branch -m {old_branch} {new_name} failed")
+
+    try:
+        wt_path.rename(new_wt_path)
+    except OSError as exc:
+        subprocess.run(
+            ["git", "-C", str(wt_path), "branch", "-m", new_name, old_branch],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        raise RuntimeError(f"mv {wt_path} -> {new_wt_path} failed: {exc}") from exc
+
+    subprocess.run(
+        ["git", "-C", str(new_wt_path), "worktree", "repair"],
+        stdout=subprocess.DEVNULL,
+    )
+    return new_wt_path

@@ -124,6 +124,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_worktree_p.set_defaults(handler=cmd_git_add_worktree)
 
+    rename_worktree_p = git_sub.add_parser(
+        "rename-worktree",
+        help="rename a worktree's branch and move its directory; print the new path",
+    )
+    rename_worktree_p.add_argument("repo", help="path to the parent git repo")
+    rename_worktree_p.add_argument("container", help="directory holding sibling worktrees")
+    rename_worktree_p.add_argument("wt_path", help="current worktree path")
+    rename_worktree_p.add_argument("new_name", help="post-prompt sanitised new branch name")
+    rename_worktree_p.set_defaults(handler=cmd_git_rename_worktree)
+
     return parser
 
 
@@ -233,6 +243,22 @@ def cmd_git_add_worktree(args: argparse.Namespace) -> int:
         default_branch_fallback=fallback,
     )
     sys.stdout.write(str(path))
+    sys.stdout.write("\n")
+    return 0
+
+
+def cmd_git_rename_worktree(args: argparse.Namespace) -> int:
+    try:
+        new_path = git.rename_worktree(
+            Path(args.repo),
+            Path(args.container),
+            Path(args.wt_path),
+            new_name=args.new_name,
+        )
+    except RuntimeError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+    sys.stdout.write(str(new_path))
     sys.stdout.write("\n")
     return 0
 

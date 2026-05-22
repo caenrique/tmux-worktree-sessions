@@ -217,8 +217,9 @@ add_worktree() {
     _tmux_sessions_py git add-worktree "$1" "$2" "$3" "$4"
 }
 
-# Rename a worktree: renames the git branch, moves the directory, repairs the
-# worktree linkage, and opens a fresh tmux session at the new path.
+# Rename a worktree: prompts for a new name, then asks Python to rename the
+# git branch, move the directory, and repair the worktree linkage. Bash still
+# owns the fzf prompt and the post-rename tmux session switch.
 rename_worktree() {
   local repo_path="$1"
   local container="$2"
@@ -245,23 +246,9 @@ rename_worktree() {
   new_name=$(sanitize_name "$(printf '%s' "$rename_output" | head -1)")
   [[ -z "$new_name" || "$new_name" == "$old_branch" ]] && return 1
 
-  local new_dir new_wt_path
-  new_dir=$(branch_to_dir "$new_name")
-  new_wt_path="$container/$new_dir"
-
-  if [[ -e "$new_wt_path" ]]; then
-    echo "Destination already exists: $new_wt_path" >&2
-    return 1
-  fi
-
-  git -C "$wt_path" branch -m "$old_branch" "$new_name" >&2 || return 1
-
-  mv "$wt_path" "$new_wt_path" || {
-    git -C "$wt_path" branch -m "$new_name" "$old_branch" >&2 2>/dev/null
-    return 1
-  }
-
-  git -C "$new_wt_path" worktree repair >&2
+  local new_wt_path
+  new_wt_path=$(_tmux_sessions_py git rename-worktree \
+    "$repo_path" "$container" "$wt_path" "$new_name") || return 1
 
   local old_session_id pane_root
   old_session_id=$(get_session_id "$(format_session_name "$wt_path")")
