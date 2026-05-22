@@ -21,7 +21,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import git, score, text, tmux
+from . import git, picker, score, text, tmux
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -173,6 +173,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="session name; defaults to format-session-name(path)",
     )
     switch_or_create_p.set_defaults(handler=cmd_tmux_switch_or_create)
+
+    picker_p = sub.add_parser("picker", help="branch/session picker helpers")
+    picker_sub = picker_p.add_subparsers(dest="picker_command", metavar="<subcommand>")
+
+    branch_entries_p = picker_sub.add_parser(
+        "branch-entries",
+        help="emit TSV rows for the branch picker ([new] sentinel + branches)",
+    )
+    branch_entries_p.add_argument("repo", help="path to the git repo")
+    branch_entries_p.set_defaults(handler=cmd_picker_branch_entries)
 
     return parser
 
@@ -356,6 +366,15 @@ def cmd_tmux_switch_or_create(args: argparse.Namespace) -> int:
         strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
         name = text.format_session_name(args.path, home=home, strip_prefixes=strip_prefixes)
     tmux.switch_or_create(Path(args.path), name)
+    return 0
+
+
+def cmd_picker_branch_entries(args: argparse.Namespace) -> int:
+    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
+    icons = picker.IconSet.from_style(style)
+    for line in picker.gen_branch_picker_entries(Path(args.repo), icons=icons):
+        sys.stdout.write(line)
+        sys.stdout.write("\n")
     return 0
 
 

@@ -9,7 +9,11 @@ FZF_INLINE="--reverse --no-scrollbar --no-info --no-separator --no-border --colo
 FZF_POPUP="--tmux bottom,100%,100% --scheme=path $FZF_INLINE"
 
 # Icons used across picker lists (TMUX_SESSIONS_ICON_STYLE: nerd|emoji|ascii; default: nerd).
-case "${TMUX_SESSIONS_ICON_STYLE:-nerd}" in
+# _ICON_STYLE caches the resolved style at source time so shims that pass
+# it through to the Python layer don't depend on the env var still being
+# set when the shim runs (bats tests scope the env override to source_common).
+_ICON_STYLE="${TMUX_SESSIONS_ICON_STYLE:-nerd}"
+case "$_ICON_STYLE" in
   nerd)
     _ICON_SESSION=" "
     _ICON_PROJECT=" "
@@ -32,6 +36,7 @@ case "${TMUX_SESSIONS_ICON_STYLE:-nerd}" in
     _ICON_NEW="+"
     ;;
   *)  # emoji
+    _ICON_STYLE=emoji
     _ICON_SESSION="🖥️"
     _ICON_PROJECT="📦"
     _ICON_BRANCH="🌱"
@@ -214,17 +219,8 @@ rename_worktree() {
 
 # Emit tab-delimited branch picker entries for fzf: [new] sentinel + all branches.
 _gen_branch_picker_entries() {
-  local repo_path="$1"
-  local remote
-  remote=$(_resolve_remote "$repo_path")
-  printf "[new]\t%s%snew branch\n" "$_ICON_NEW" "$_ICON_SEP"
-  list_branches "$repo_path" | while IFS= read -r branch; do
-    if [[ "$branch" == $remote/* ]]; then
-      printf "%s\t%s%s%s\n" "$branch" "$_ICON_REMOTE" "$_ICON_SEP" "$branch"
-    else
-      printf "%s\t%s%s%s\n" "$branch" "$_ICON_BRANCH" "$_ICON_SEP" "$branch"
-    fi
-  done
+  TMUX_SESSIONS_ICON_STYLE="$_ICON_STYLE" \
+    _tmux_sessions_py picker branch-entries "$1"
 }
 
 # Return 0 if git fetch should run (FETCH_HEAD missing or >15 min old).

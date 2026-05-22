@@ -265,7 +265,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
   (reuse `tests/fixtures/bin/tmux` from a Python fixture that prepends
   it to `PATH`).
 
-### Step 16 — `_gen_branch_picker_entries` `[ ]`
+### Step 16 — `_gen_branch_picker_entries` `[x]`
 
 - Pure: `picker.gen_branch_picker_entries(repo: Path, *, icons:
   IconSet) -> Iterator[str]` in `scripts/tmux_sessions/picker.py`.
