@@ -350,7 +350,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
 
 ## Phase 5 — Cleanup
 
-### Step 23 — Collapse the bash shims `[ ]`
+### Step 23 — Collapse the bash shims `[x]`
 
 - Delete `scripts/common.sh`, `scripts/sessions.sh`, `scripts/fetch_reload.sh`
   (they are now all one-liner shims).
@@ -362,7 +362,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
   scoped to `tmux-sessions.tmux` (and any leftover `.bash` test
   helpers).
 
-### Step 24 — Retire bats tests `[ ]`
+### Step 24 — Retire bats tests `[x]`
 
 - Verify pytest covers every bats case (one-to-one map produced as a
   table in this PR's description).
@@ -373,7 +373,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
   from `packages`. Drop bats install instructions from `CLAUDE.md`
   and `README.md`.
 
-### Step 25 — Final polish `[ ]`
+### Step 25 — Final polish `[x]`
 
 - Add a `pyproject.toml` console script entry (`tmux-sessions = ...`)
   and document it in the README so users can invoke it directly when

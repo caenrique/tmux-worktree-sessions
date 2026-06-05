@@ -135,6 +135,16 @@ devenv shell    # enter the dev shell (uv sync runs automatically)
 devenv test     # run every check (what CI runs)
 ```
 
+Inside the dev shell, the package exposes a `tmux-sessions` console
+script for ad-hoc debugging — equivalent to
+`python3 -m tmux_sessions`:
+
+```sh
+tmux-sessions sessions list-projects   # emit the project rows
+tmux-sessions score sort < entries     # sort by recency score
+tmux-sessions --help
+```
+
 See [BUILD.md](BUILD.md) for the full guide — task list, dependency
 management, lint setup, test layout, and CI details.
 
