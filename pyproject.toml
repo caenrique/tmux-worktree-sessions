@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tmux-worktree-sessions"
+version = "0.1.0"
+description = "tmux session and git worktree picker"
+requires-python = ">=3.8"
+
+[project.scripts]
+tws = "tmux_worktree_sessions.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-mock",
+    "ruff",
+    "mypy",
+]
+
+[tool.setuptools.packages.find]
+where = ["scripts"]
+include = ["tmux_worktree_sessions*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+strict = true
+explicit_package_bases = true
+mypy_path = "scripts"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+pythonpath = ["scripts"]

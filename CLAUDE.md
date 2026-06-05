@@ -2,80 +2,53 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Testing
+## Development
 
-The test suite lives in `tests/` and runs under [bats-core](https://github.com/bats-core/bats-core). Install the runner from your package manager:
-
-```sh
-brew install bats-core
-# or on Debian/Ubuntu:
-sudo apt-get install bats
-```
-
-`tests/test_helper.bash` ships a minimal portable assertion library, so `bats-support` / `bats-assert` / `bats-file` are not required.
-
-Run the full suite via the Makefile, or invoke bats directly for finer control:
+See [BUILD.md](BUILD.md) for the full dev setup: `devenv shell`,
+`devenv test`, individual task names, dependency management, lint
+configuration, and test layout. Quick reference:
 
 ```sh
-make test                                      # full bats suite
-bats tests/common.bats                         # one file
-bats --filter "format_session_name" tests/     # one function
-bats --print-output-on-failure tests/          # show captured output on failure
+devenv shell                              # enter dev shell (uv sync runs automatically)
+devenv test                               # run every check (what CI runs)
+devenv tasks run python:test              # one task at a time
+uv run pytest tests/python/test_score.py  # one pytest file
+uv run pytest tests/python -k worktree    # filter by name
 ```
 
-For ad-hoc smoke checks, you can still drive a script directly:
-
-```sh
-TMUX_SESSIONS_PROJECTS_DIRS="$HOME/Projects" \
-TMUX_SESSIONS_ICON_STYLE=nerd \
-bash scripts/sessions.sh
-```
-
-## Linting
-
-Shell scripts are linted with [shellcheck](https://www.shellcheck.net/):
-
-```sh
-brew install shellcheck
-# or on Debian/Ubuntu:
-sudo apt-get install shellcheck
-```
-
-Run it from the repo root before committing:
-
-```sh
-make lint                  # shellcheck only
-make check                 # lint + test (the default target)
-```
-
-The same scans run in CI via `.github/workflows/tests.yml`.
+The plugin's logic lives in a typed Python package under
+`scripts/tmux_worktree_sessions/`. Python ≥ 3.8 is required; all Python code
+uses **explicit type annotations** on every function signature, and
+`mypy --strict` must pass. The bash side is now just `tmux-worktree-sessions.tmux`,
+the TPM hook that reads tmux options and dispatches to the Python entry
+point.
 
 ## Change policy
 
 Every bug fix and every new feature MUST:
 
-1. Update `tests/` to cover the changed behaviour, and `bats tests/` MUST pass.
-2. Run shellcheck on any modified shell file and address every warning before commit. Suppress with `# shellcheck disable=SC####` only when the warning is a known false positive, and include a comment explaining why.
+1. Update `tests/python/` to cover the changed behaviour, and `uv run pytest tests/python` MUST pass.
+2. Run shellcheck on `tmux-worktree-sessions.tmux` if you touched it, and address every warning before commit. Suppress with `# shellcheck disable=SC####` only when the warning is a known false positive, and include a comment explaining why.
 
-A change is not done until both the test suite and shellcheck are green.
+A change is not done until `devenv test` is green.
 
-- New function in `scripts/<name>.sh` → add cases to `tests/<name>.bats`.
-- New external dependency invoked by the scripts → add a programmable stub under `tests/fixtures/bin/` and a loader hook in `tests/test_helper.bash`.
+- New function in `scripts/tmux_worktree_sessions/<module>.py` → add cases to `tests/python/test_<module>.py`.
+- New external dependency invoked by the package → add a programmable stub under `tests/python/_stubs/` and a fixture hook in `tests/python/conftest.py`.
 - Regression fixes → add a failing test first, then make it pass.
 
-CI runs the bats suite on Linux and macOS, and shellcheck on Linux, for every push and pull request via `.github/workflows/tests.yml`.
+CI runs `devenv test` on Linux and macOS for every push and pull request via `.github/workflows/tests.yml` — that runs the Python checks and shellcheck together.
 
 ## Architecture
 
-The plugin is three bash scripts and one TPM entry point:
+The plugin is one bash entry point and a Python package:
 
-- **`tmux-sessions.tmux`** — TPM entry point. Reads `@tmux-sessions-*` tmux options, expands literal `$HOME` in option values (tmux does not shell-expand them), and binds the trigger key via `run-shell` with all config passed as environment variables.
+- **`tmux-worktree-sessions.tmux`** — TPM entry point. Reads `@tws-*` tmux options, expands literal `$HOME` in option values (tmux does not shell-expand them), and binds the trigger key via `run-shell` with all config passed as environment variables. The bound command invokes `python3 -m tmux_worktree_sessions sessions manage` with `PYTHONPATH` pointing at the plugin's `scripts/` directory.
 
-- **`scripts/common.sh`** — Sourced by the other two scripts. Contains: fzf style flags (`FZF_INLINE`, `FZF_POPUP`), icon set selection, score tracking (`update_score`, `sort_by_score`), project discovery (`list_git_projects`), session switching (`switch_or_create_session`), and all git worktree helpers (`add_worktree`, `rename_worktree`, `pick_branch`).
-
-- **`scripts/sessions.sh`** — The main picker. `build_entries` emits a 3-column TSV (`type<TAB>key<TAB>display`) where type is `s` (session), `p` (project), or `n` (new). `manage_sessions` runs the fzf loop and dispatches on the selected key. Ctrl-D/X/R actions are implemented as `_action_*` functions and re-invoked as subprocesses via fzf's `execute`/`execute-silent` bindings so they can mutate a shared tmpfile without blocking the picker.
-
-- **`scripts/fetch_reload.sh`** — Background helper called by `pick_branch` (in common.sh) via fzf `execute-silent`. Runs `git fetch`, regenerates the branch list, and sends fzf a reload command over its `--listen` port. Shows a spinner in the fzf header while fetching.
+- **`scripts/tmux_worktree_sessions/`** — Typed Python package with the pure / CLI split called out in `docs/python-migration.md`:
+  - `__main__.py` — argparse dispatcher with one `cmd_<group>_<verb>` handler per subcommand. Owns env reads, stdin/stdout, and file I/O.
+  - `score.py`, `text.py`, `git.py`, `tmux.py`, `picker.py`, `fetch_reload.py`, `sessions.py` — pure modules; functions take all inputs as explicit (often keyword-only) parameters.
+  - `sessions.build_entries` emits the 4-column TSV (`type<TAB>key<TAB>search<TAB>display`) the picker consumes. `cmd_sessions_manage` runs the fzf loop and dispatches on the selected key. Ctrl-D/X/R actions re-invoke `python3 -m tmux_worktree_sessions sessions action <name> ...` via fzf's `execute`/`execute-silent` bindings so they can mutate a shared tmpfile without blocking the picker.
+  - `fetch_reload.fetch_and_reload` is the background helper called from the branch picker via fzf `execute-silent`: runs `git fetch`, regenerates the branch list, and sends fzf a reload command over its `--listen` port.
 
 ## Key conventions
 

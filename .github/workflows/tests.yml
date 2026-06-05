@@ -6,39 +6,23 @@ on:
   pull_request:
 
 jobs:
-  bats:
+  check:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: bats-core/bats-action@3.0.0
+      - uses: cachix/install-nix-action@v31
+
+      - uses: cachix/cachix-action@v16
         with:
-          bats-version: 1.11.0
-          support-install: false
-          assert-install: false
-          file-install: false
-          detik-install: false
+          name: devenv
 
-      - name: Install tmux and fzf (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y tmux fzf
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
 
-      - name: Install tmux and fzf (macOS)
-        if: runner.os == 'macOS'
-        run: brew install tmux fzf
-
-      - name: Run bats tests
-        run: make test
-
-  shellcheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - name: Run shellcheck
-        run: make lint
+      - name: Run devenv test
+        run: devenv test
