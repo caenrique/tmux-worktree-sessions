@@ -298,7 +298,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
 
 ## Phase 4 — Sessions orchestration
 
-### Step 19 — `list_projects` (sessions.sh) and `_is_orphaned_worktree_dir` `[ ]`
+### Step 19 — `list_projects` (sessions.sh) and `_is_orphaned_worktree_dir` `[x]`
 
 - Pure: `sessions.list_projects(...)` and
   `sessions.is_orphaned_worktree(path: Path, *, container: Path) ->

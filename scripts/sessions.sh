@@ -11,17 +11,15 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# Emit one "session_name<TAB>cwd" line per discoverable project.
-# TMUX_SESSIONS_MANUAL_SESSIONS is a space-separated list of "name:path" pairs.
+# Emit one "session_name<TAB>cwd" line per discoverable project, then one
+# per manual session. TMUX_SESSIONS_MANUAL_SESSIONS is a space-separated list
+# of "name:path" pairs; a leading ~ in the path is expanded to $HOME.
 list_projects() {
-  list_git_projects
-  local entry
-  for entry in ${TMUX_SESSIONS_MANUAL_SESSIONS:-}; do
-    local name="${entry%%:*}"
-    local path="${entry#*:}"
-    path="${path/#\~/$HOME}"
-    printf "%s\t%s\n" "$name" "$path"
-  done
+  TMUX_SESSIONS_PROJECTS_DIRS="${TMUX_SESSIONS_PROJECTS_DIRS:-$HOME/Projects}" \
+  TMUX_SESSIONS_MAX_DEPTH="${TMUX_SESSIONS_MAX_DEPTH:-6}" \
+  TMUX_SESSIONS_STRIP_PREFIXES="${TMUX_SESSIONS_STRIP_PREFIXES:-}" \
+  TMUX_SESSIONS_MANUAL_SESSIONS="${TMUX_SESSIONS_MANUAL_SESSIONS:-}" \
+    _tmux_sessions_py sessions list-projects
 }
 
 # Catppuccin Mocha green/yellow for running session rows.
@@ -113,16 +111,7 @@ build_entries() {
 # Return 0 if path looks like an orphaned worktree directory: its parent
 # contains at least one other directory that is a git repo (.git present).
 _is_orphaned_worktree_dir() {
-  local path="$1"
-  local container
-  container=$(dirname "$path")
-  local sibling
-  for sibling in "$container"/*/; do
-    sibling="${sibling%/}"
-    [[ "$sibling" == "$path" ]] && continue
-    [[ -e "$sibling/.git" ]] && return 0
-  done
-  return 1
+  _tmux_sessions_py sessions is-orphaned-worktree "$1"
 }
 
 # ctrl-d: kill session + remove its worktree if applicable (session rows);

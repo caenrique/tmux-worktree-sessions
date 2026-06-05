@@ -22,7 +22,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import fetch_reload, git, picker, score, text, tmux
+from . import fetch_reload, git, picker, score, sessions, text, tmux
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -195,6 +195,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to fetch_reload.sh (delegates background fetch+reload)",
     )
     pick_branch_p.set_defaults(handler=cmd_picker_pick_branch)
+
+    sessions_p = sub.add_parser("sessions", help="session picker helpers")
+    sessions_sub = sessions_p.add_subparsers(dest="sessions_command", metavar="<subcommand>")
+
+    sessions_list_p = sessions_sub.add_parser(
+        "list-projects",
+        help="emit session_name<TAB>path for git projects then manual sessions",
+    )
+    sessions_list_p.set_defaults(handler=cmd_sessions_list_projects)
+
+    is_orphaned_p = sessions_sub.add_parser(
+        "is-orphaned-worktree",
+        help="exit 0 if path's parent contains a sibling git repo",
+    )
+    is_orphaned_p.add_argument("path", help="candidate worktree directory")
+    is_orphaned_p.set_defaults(handler=cmd_sessions_is_orphaned_worktree)
 
     fetch_reload_p = sub.add_parser(
         "fetch-reload",
@@ -448,6 +464,34 @@ def cmd_fetch_reload(args: argparse.Namespace) -> int:
         os._exit(0)
     except BaseException:
         os._exit(1)
+
+
+def cmd_sessions_list_projects(args: argparse.Namespace) -> int:
+    home = os.environ.get("HOME", "")
+    raw_dirs = os.environ.get("TMUX_SESSIONS_PROJECTS_DIRS") or f"{home}/Projects"
+    max_depth = int(os.environ.get("TMUX_SESSIONS_MAX_DEPTH") or 6)
+    strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
+    manual_spec = os.environ.get("TMUX_SESSIONS_MANUAL_SESSIONS") or ""
+
+    roots: list[Path] = []
+    for entry in raw_dirs.split():
+        expanded = entry.replace("~", home, 1) if entry.startswith("~") else entry
+        roots.append(Path(expanded))
+
+    for name, path in sessions.list_projects(
+        roots,
+        max_depth=max_depth,
+        home=home,
+        strip_prefixes=strip_prefixes,
+        manual_spec=manual_spec,
+    ):
+        sys.stdout.write(f"{name}\t{path}\n")
+    return 0
+
+
+def cmd_sessions_is_orphaned_worktree(args: argparse.Namespace) -> int:
+    path = Path(args.path)
+    return 0 if sessions.is_orphaned_worktree(path, container=path.parent) else 1
 
 
 def cmd_text_format_session_name(args: argparse.Namespace) -> int:
