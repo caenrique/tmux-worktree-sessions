@@ -1,8 +1,8 @@
-"""Picker entry generation for tmux-sessions.
+"""Picker entry generation for tmux-worktree-sessions.
 
 Pure helpers that build the TSV rows fzf consumes plus the interactive
 ``pick_branch`` loop that drives fzf itself. Subprocess calls into real
-``git`` happen via :mod:`tmux_sessions.git`; this module owns the
+``git`` happen via :mod:`tmux_worktree_sessions.git`; this module owns the
 icon/format logic and the fzf orchestration.
 """
 
@@ -101,7 +101,7 @@ def gen_branch_picker_entries(repo: Path, *, icons: IconSet) -> Iterator[str]:
     """Yield TSV lines for the branch picker.
 
     First line is the ``[new]`` sentinel, then one line per branch
-    returned by :func:`tmux_sessions.git.list_branches`. Branches whose
+    returned by :func:`tmux_worktree_sessions.git.list_branches`. Branches whose
     name starts with ``<remote>/`` get the remote icon; the rest get
     the branch icon. When the repo has no remote, every branch falls
     through to the local icon.

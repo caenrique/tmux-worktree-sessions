@@ -1,4 +1,4 @@
-# tmux-sessions
+# tmux-worktree-sessions
 
 A tmux plugin that gives you a unified fuzzy picker for sessions and git worktrees. Open any project, switch between running sessions, create and delete worktrees, and rename branches — all from a single keyboard shortcut, ranked by how recently you used them.
 
@@ -27,7 +27,7 @@ Selecting an entry switches to the session (or creates one if the project isn't 
 Add to your `~/.config/tmux/tmux.conf`:
 
 ```tmux
-set -g @plugin 'caenrique/tmux-sessions'
+set -g @plugin 'caenrique/tmux-worktree-sessions'
 ```
 
 Then press `prefix + I` inside tmux to install.
@@ -37,7 +37,7 @@ Then press `prefix + I` inside tmux to install.
 Clone the repository and source the entry point from your tmux config:
 
 ```tmux
-run-shell '/path/to/tmux-sessions/tmux-sessions.tmux'
+run-shell '/path/to/tmux-worktree-sessions/tmux-worktree-sessions.tmux'
 ```
 
 ## Configuration
@@ -46,32 +46,32 @@ All options are set in `tmux.conf` with `set -g @option value`. Every option has
 
 | Option | Default — Description |
 |---|---|
-| `@tmux-sessions-key` | `C-S-s` — Key binding to open the session picker |
-| `@tmux-sessions-projects-dir` | `$HOME/Projects` — Space-separated list of root directories to scan for git repos |
-| `@tmux-sessions-strip-prefixes` | *(none)* — Space-separated path prefixes to strip from display names |
-| `@tmux-sessions-manual-sessions` | *(none)* — Always-visible entries as space-separated `name:path` pairs |
-| `@tmux-sessions-scores-file` | `$HOME/.local/share/tmux-sessions/scores.tsv` — Path to the recency score database |
-| `@tmux-sessions-max-depth` | `6` — How many directory levels deep to search for git repos |
-| `@tmux-sessions-default-branch` | `main` — Fallback branch name when the remote default can't be determined |
-| `@tmux-sessions-score-half-life` | `14` — Days until a session's recency score decays to half its value |
-| `@tmux-sessions-score-path-boost` | `1.0` — Multiplier for the path-similarity boost; `0` disables it entirely |
-| `@tmux-sessions-icon-style` | `nerd` — Icon set: `nerd` (requires a Nerd Font), `emoji`, `ascii`, or `none` |
+| `@tws-key` | `C-S-s` — Key binding to open the session picker |
+| `@tws-projects-dir` | `$HOME/Projects` — Space-separated list of root directories to scan for git repos |
+| `@tws-strip-prefixes` | *(none)* — Space-separated path prefixes to strip from display names |
+| `@tws-manual-sessions` | *(none)* — Always-visible entries as space-separated `name:path` pairs |
+| `@tws-scores-file` | `$HOME/.local/share/tws/scores.tsv` — Path to the recency score database |
+| `@tws-max-depth` | `6` — How many directory levels deep to search for git repos |
+| `@tws-default-branch` | `main` — Fallback branch name when the remote default can't be determined |
+| `@tws-score-half-life` | `14` — Days until a session's recency score decays to half its value |
+| `@tws-score-path-boost` | `1.0` — Multiplier for the path-similarity boost; `0` disables it entirely |
+| `@tws-icon-style` | `nerd` — Icon set: `nerd` (requires a Nerd Font), `emoji`, `ascii`, or `none` |
 
 ### Example configuration
 
 ```tmux
-set -g @plugin 'caenrique/tmux-sessions'
+set -g @plugin 'caenrique/tmux-worktree-sessions'
 
-set -g @tmux-sessions-key 'C-S-s'
+set -g @tws-key 'C-S-s'
 
 # Scan multiple project roots
-set -g @tmux-sessions-projects-dir '$HOME/Projects $HOME/work'
+set -g @tws-projects-dir '$HOME/Projects $HOME/work'
 
 # Strip these prefixes from display names so paths are shorter
-set -g @tmux-sessions-strip-prefixes '$HOME/Projects/github.com $HOME/Projects/gitlab.com'
+set -g @tws-strip-prefixes '$HOME/Projects/github.com $HOME/Projects/gitlab.com'
 
 # Always show these entries regardless of git discovery
-set -g @tmux-sessions-manual-sessions 'Notes:~/Notes dotfiles:~/.config'
+set -g @tws-manual-sessions 'Notes:~/Notes dotfiles:~/.config'
 ```
 
 ### Status bar display names
@@ -137,14 +137,12 @@ devenv shell    # enter the dev shell (uv sync runs automatically)
 devenv test     # run every check (what CI runs)
 ```
 
-Inside the dev shell, the package exposes a `tmux-sessions` console
-script for ad-hoc debugging — equivalent to
-`python3 -m tmux_sessions`:
+Inside the dev shell, the package exposes a `tws` console script for
+ad-hoc debugging — equivalent to `python3 -m tmux_worktree_sessions`:
 
 ```sh
-tmux-sessions sessions list-projects   # emit the project rows
-tmux-sessions score sort < entries     # sort by recency score
-tmux-sessions --help
+tws sessions manage      # run the picker outside a TPM-managed tmux
+tws --help
 ```
 
 See [BUILD.md](BUILD.md) for the full guide — task list, dependency
@@ -156,11 +154,11 @@ management, lint setup, test layout, and CI details.
 
 **Projects** are ranked by how recently *and* frequently you've opened them. Each time you switch to a session for a project, its score increases by 1. Scores decay with a configurable half-life (default: 14 days), so projects you haven't touched in a while gradually sink below more active ones.
 
-Project entries whose path shares a longer prefix with your current working directory also get a boost (configurable via `@tmux-sessions-score-path-boost`, default `1.0`). At the default values, a same-repo worktree picked at least once in the last month will rank above an unrelated project picked last week, while a project you've picked multiple times this week always stays at the top.
+Project entries whose path shares a longer prefix with your current working directory also get a boost (configurable via `@tws-score-path-boost`, default `1.0`). At the default values, a same-repo worktree picked at least once in the last month will rank above an unrelated project picked last week, while a project you've picked multiple times this week always stays at the top.
 
 ## See also
 
-| | tmux-sessions | [tmux-sessionizer](https://github.com/ThePrimeagen/tmux-sessionizer) | [tmux-fzf](https://github.com/sainnhe/tmux-fzf) | [tmux-project](https://github.com/sei40kr/tmux-project) |
+| | tmux-worktree-sessions | [tmux-sessionizer](https://github.com/ThePrimeagen/tmux-sessionizer) | [tmux-fzf](https://github.com/sainnhe/tmux-fzf) | [tmux-project](https://github.com/sei40kr/tmux-project) |
 |---|---|---|---|---|
 | Session switching | ✓ | ✓ | ✓ | ✓ |
 | Project discovery | ✓ | ✓ | — | ✓ |
@@ -169,7 +167,7 @@ Project entries whose path shares a longer prefix with your current working dire
 | Branch picker | ✓ | — | — | — |
 | Window/pane management | — | — | ✓ | — |
 
-**tmux-sessionizer** is the go-to if you want something minimal and scriptable. **tmux-fzf** is a better fit if you also need window and pane management. **tmux-project** is similar in scope to tmux-sessions but without worktree support. Choose this plugin if your workflow revolves around git worktrees and you want everything — project discovery, session switching, and branch management — in one picker.
+**tmux-sessionizer** is the go-to if you want something minimal and scriptable. **tmux-fzf** is a better fit if you also need window and pane management. **tmux-project** is similar in scope to tmux-worktree-sessions but without worktree support. Choose this plugin if your workflow revolves around git worktrees and you want everything — project discovery, session switching, and branch management — in one picker.
 
 ---
 

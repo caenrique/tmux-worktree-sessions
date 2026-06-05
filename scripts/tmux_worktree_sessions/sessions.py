@@ -1,7 +1,7 @@
 """Pure helpers for the session picker CLI layer.
 
 Functions here take all inputs as explicit parameters; the CLI layer in
-``tmux_sessions.__main__`` resolves env vars, the filesystem, and stdout.
+``tmux_worktree_sessions.__main__`` resolves env vars, the filesystem, and stdout.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ RESET = "\033[0m"
 
 
 def parse_manual_sessions(spec: str, *, home: str) -> list[tuple[str, Path]]:
-    """Parse ``TMUX_SESSIONS_MANUAL_SESSIONS`` into ``(name, path)`` pairs.
+    """Parse ``TWS_MANUAL_SESSIONS`` into ``(name, path)`` pairs.
 
     ``spec`` is whitespace-separated ``name:path`` tokens. A leading
     ``~`` in a path is expanded to ``home``. Tokens without a ``:`` are
@@ -182,7 +182,7 @@ def build_entries(
     project rows sorted by recency score, then the sentinel.
 
     All tmux state (current/previous session, pane path, session list)
-    is queried via :mod:`tmux_sessions.tmux` — these are external state
+    is queried via :mod:`tmux_worktree_sessions.tmux` — these are external state
     queries with no caller-supplied parameters, so they belong in the
     pure layer per the migration plan.
     """

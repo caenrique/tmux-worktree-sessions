@@ -1,4 +1,4 @@
-"""Pure-layer tests for :mod:`tmux_sessions.picker`.
+"""Pure-layer tests for :mod:`tmux_worktree_sessions.picker`.
 
 Uses the ``make_repo`` fixture so the underlying ``git.list_branches``
 and ``git.resolve_remote`` calls run against real tmpdir repos, and
@@ -12,7 +12,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from tmux_sessions.picker import (
+from tmux_worktree_sessions.picker import (
     BranchChoice,
     IconSet,
     gen_branch_picker_entries,

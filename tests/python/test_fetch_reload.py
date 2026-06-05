@@ -1,4 +1,4 @@
-"""Pure-layer tests for :mod:`tmux_sessions.fetch_reload`.
+"""Pure-layer tests for :mod:`tmux_worktree_sessions.fetch_reload`.
 
 The curl stub captures every POST so we can assert on the final
 ``change-header(...)+reload(cat ...)`` payload, the supplied port, and
@@ -13,8 +13,8 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from tmux_sessions.fetch_reload import fetch_and_reload
-from tmux_sessions.picker import IconSet
+from tmux_worktree_sessions.fetch_reload import fetch_and_reload
+from tmux_worktree_sessions.picker import IconSet
 
 from .conftest import CurlStub
 

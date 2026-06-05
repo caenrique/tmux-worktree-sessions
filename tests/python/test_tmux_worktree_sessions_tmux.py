@@ -1,6 +1,6 @@
-"""Tests for the ``tmux-sessions.tmux`` TPM entry point.
+"""Tests for the ``tmux-worktree-sessions.tmux`` TPM entry point.
 
-The entry point reads ``@tmux-sessions-*`` options via ``tmux show-option``
+The entry point reads ``@tws-*`` options via ``tmux show-option``
 and registers a ``bind-key`` that invokes the Python dispatcher. These
 tests stub tmux to canned option responses, run the script, and assert
 on the recorded ``bind-key`` invocation row in ``TMUX_STUB_LOG``.
@@ -18,7 +18,7 @@ import pytest
 from .conftest import TmuxStub
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_TMUX_TPM_ENTRY = _REPO_ROOT / "tmux-sessions.tmux"
+_TMUX_TPM_ENTRY = _REPO_ROOT / "tmux-worktree-sessions.tmux"
 
 
 def _run_tpm_entry(
@@ -54,38 +54,38 @@ def test_binds_default_key(tmux_stub: Callable[..., TmuxStub]) -> None:
 
 def test_honours_custom_key(tmux_stub: Callable[..., TmuxStub]) -> None:
     stub = tmux_stub()
-    _run_tpm_entry(stub, options="@tmux-sessions-key=M-x")
+    _run_tpm_entry(stub, options="@tws-key=M-x")
     row = _bind_key_row(stub)
     assert "\tM-x\t" in row
 
 
 def test_expands_home_in_projects_dir(tmux_stub: Callable[..., TmuxStub]) -> None:
     stub = tmux_stub()
-    _run_tpm_entry(stub, options="@tmux-sessions-projects-dir=$HOME/MyProjects")
+    _run_tpm_entry(stub, options="@tws-projects-dir=$HOME/MyProjects")
     row = _bind_key_row(stub)
     home = os.environ["HOME"]
-    assert f"TMUX_SESSIONS_PROJECTS_DIRS='{home}/MyProjects'" in row
+    assert f"TWS_PROJECTS_DIRS='{home}/MyProjects'" in row
     assert "$HOME/MyProjects" not in row
 
 
 def test_expands_home_in_strip_prefixes(tmux_stub: Callable[..., TmuxStub]) -> None:
     stub = tmux_stub()
-    _run_tpm_entry(stub, options="@tmux-sessions-strip-prefixes=$HOME/Projects $HOME/work")
+    _run_tpm_entry(stub, options="@tws-strip-prefixes=$HOME/Projects $HOME/work")
     row = _bind_key_row(stub)
     home = os.environ["HOME"]
-    assert f"TMUX_SESSIONS_STRIP_PREFIXES='{home}/Projects {home}/work'" in row
+    assert f"TWS_STRIP_PREFIXES='{home}/Projects {home}/work'" in row
 
 
 def test_forwards_numeric_option_values(tmux_stub: Callable[..., TmuxStub]) -> None:
     stub = tmux_stub()
     _run_tpm_entry(
         stub,
-        options=("@tmux-sessions-max-depth=8\n@tmux-sessions-score-half-life=30\n@tmux-sessions-score-path-boost=2.5"),
+        options=("@tws-max-depth=8\n@tws-score-half-life=30\n@tws-score-path-boost=2.5"),
     )
     row = _bind_key_row(stub)
-    assert "TMUX_SESSIONS_MAX_DEPTH='8'" in row
-    assert "TMUX_SESSIONS_SCORE_HALF_LIFE='30'" in row
-    assert "TMUX_SESSIONS_SCORE_PATH_BOOST='2.5'" in row
+    assert "TWS_MAX_DEPTH='8'" in row
+    assert "TWS_SCORE_HALF_LIFE='30'" in row
+    assert "TWS_SCORE_PATH_BOOST='2.5'" in row
 
 
 def test_invokes_python_dispatcher(tmux_stub: Callable[..., TmuxStub]) -> None:
@@ -93,7 +93,7 @@ def test_invokes_python_dispatcher(tmux_stub: Callable[..., TmuxStub]) -> None:
     _run_tpm_entry(stub, options="")
     row = _bind_key_row(stub)
     assert f"PYTHONPATH='{_REPO_ROOT}/scripts'" in row
-    assert "python3 -m tmux_sessions sessions manage" in row
+    assert "python3 -m tmux_worktree_sessions sessions manage" in row
 
 
 def _set_option_row(tmux_stub: TmuxStub, option: str) -> str | None:
@@ -113,7 +113,7 @@ def test_substitutes_session_display_name_in_status_left(
     assert row is not None, "expected set-option for status-left"
     assert "#{session_display_name}" not in row
     assert "#(" in row
-    assert "tmux_sessions sessions display-name" in row
+    assert "tmux_worktree_sessions sessions display-name" in row
     assert "| %H:%M" in row
 
 
@@ -125,7 +125,7 @@ def test_substitutes_session_display_name_in_status_right(
     row = _set_option_row(stub, "status-right")
     assert row is not None, "expected set-option for status-right"
     assert "#{session_display_name}" not in row
-    assert "tmux_sessions sessions display-name" in row
+    assert "tmux_worktree_sessions sessions display-name" in row
 
 
 def test_does_not_touch_status_options_without_placeholder(
@@ -154,11 +154,11 @@ def test_substituted_command_carries_strip_prefixes(
     home = os.environ["HOME"]
     _run_tpm_entry(
         stub,
-        options=("status-left=#{session_display_name}\n@tmux-sessions-strip-prefixes=$HOME/Projects"),
+        options=("status-left=#{session_display_name}\n@tws-strip-prefixes=$HOME/Projects"),
     )
     row = _set_option_row(stub, "status-left")
     assert row is not None
-    assert f"TMUX_SESSIONS_STRIP_PREFIXES='{home}/Projects'" in row
+    assert f"TWS_STRIP_PREFIXES='{home}/Projects'" in row
 
 
 @pytest.fixture(autouse=True)

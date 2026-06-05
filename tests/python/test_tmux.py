@@ -1,4 +1,4 @@
-"""Tests for :mod:`tmux_sessions.tmux`.
+"""Tests for :mod:`tmux_worktree_sessions.tmux`.
 
 Covers ``session_id`` and ``switch_or_create``. The tmux stub at
 ``tests/python/_stubs/tmux`` is loaded via the ``tmux_stub`` fixture.
@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from tmux_sessions.tmux import session_id, switch_or_create
+from tmux_worktree_sessions.tmux import session_id, switch_or_create
 
 from .conftest import TmuxStub
 

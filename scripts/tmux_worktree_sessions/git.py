@@ -1,7 +1,7 @@
-"""Pure git helpers for tmux-sessions.
+"""Pure git helpers for tmux-worktree-sessions.
 
 Functions in this module take all inputs as explicit parameters; the
-CLI layer in ``tmux_sessions.__main__`` resolves env/args and writes
+CLI layer in ``tmux_worktree_sessions.__main__`` resolves env/args and writes
 the result. Subprocess calls to real ``git`` are external state queries
 and live here per the migration plan.
 """

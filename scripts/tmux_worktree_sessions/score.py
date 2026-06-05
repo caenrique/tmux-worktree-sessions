@@ -1,4 +1,4 @@
-"""Pure scoring helpers for tmux-sessions picker entries.
+"""Pure scoring helpers for tmux-worktree-sessions picker entries.
 
 The score file is a TSV with one row per picked entry: ``name<TAB>score<TAB>ts``.
 Scores decay exponentially with a configurable half-life. ``sort_rows``
@@ -7,7 +7,7 @@ adding a path-similarity boost so same-repo worktrees outrank
 same-org projects.
 
 The functions below take all inputs as explicit parameters; the CLI
-layer in ``tmux_sessions.__main__`` resolves env vars / wall-clock /
+layer in ``tmux_worktree_sessions.__main__`` resolves env vars / wall-clock /
 stdin/stdout. ``bump_in_file`` is the one place that owns score-file
 I/O, replacing what would otherwise be a duplicated read/parse/merge/
 atomic-rewrite dance at every call site.

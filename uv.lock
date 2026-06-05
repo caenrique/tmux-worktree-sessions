@@ -548,7 +548,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tmux-sessions"
+name = "tmux-worktree-sessions"
 version = "0.1.0"
 source = { editable = "." }
 

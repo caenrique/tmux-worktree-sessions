@@ -1,8 +1,8 @@
-"""Pure-layer tests for :mod:`tmux_sessions.text`."""
+"""Pure-layer tests for :mod:`tmux_worktree_sessions.text`."""
 
 from __future__ import annotations
 
-from tmux_sessions.text import format_session_name, sanitize_name, strip_ansi
+from tmux_worktree_sessions.text import format_session_name, sanitize_name, strip_ansi
 
 
 def test_strip_ansi_removes_single_sgr_escape() -> None:

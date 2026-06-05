@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from tmux_sessions.score import (
+from tmux_worktree_sessions.score import (
     bump_in_file,
     current_scores,
     format_score_table,

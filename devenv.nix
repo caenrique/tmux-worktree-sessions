@@ -46,11 +46,11 @@
       before = [ "devenv:enterTest" ];
     };
     "python:typecheck" = {
-      exec = "uv run mypy scripts/tmux_sessions";
+      exec = "uv run mypy scripts/tmux_worktree_sessions";
       before = [ "devenv:enterTest" ];
     };
     "shellcheck:lint" = {
-      exec = "shellcheck --severity=warning tmux-sessions.tmux";
+      exec = "shellcheck --severity=warning tmux-worktree-sessions.tmux";
       before = [ "devenv:enterTest" ];
     };
   };

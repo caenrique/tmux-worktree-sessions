@@ -1,8 +1,8 @@
-"""Shared pytest fixtures for the tmux_sessions Python tests.
+"""Shared pytest fixtures for the tmux_worktree_sessions Python tests.
 
 ``make_repo`` spins up a real git repo (with optional sibling bare
 ``origin``) under a tmpdir so subprocess-based helpers in
-:mod:`tmux_sessions.git` can be exercised end-to-end. ``tmux_stub``,
+:mod:`tmux_worktree_sessions.git` can be exercised end-to-end. ``tmux_stub``,
 ``fzf_stub``, and ``curl_stub`` prepend programmable scripts in
 ``_stubs/`` onto PATH so subprocess calls land on canned responses.
 """

@@ -1,8 +1,8 @@
-"""Pure text utilities for tmux-sessions.
+"""Pure text utilities for tmux-worktree-sessions.
 
 This module is the **pure layer** — it never touches ``os.environ``,
 ``sys.stdin``/``stdout``, ``argparse``, the wall clock, or files. The
-CLI layer in ``tmux_sessions.__main__`` resolves those concerns and
+CLI layer in ``tmux_worktree_sessions.__main__`` resolves those concerns and
 calls the functions below with explicit parameters.
 """
 

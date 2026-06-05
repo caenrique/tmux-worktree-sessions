@@ -1,6 +1,6 @@
 # BUILD.md
 
-Local development guide for `tmux-sessions`. Covers the dev shell,
+Local development guide for `tmux-worktree-sessions`. Covers the dev shell,
 task runner, dependency management, test layout, and lint setup.
 
 ## Prerequisites
@@ -51,7 +51,7 @@ devenv tasks run python:test           # pytest tests/python
 devenv tasks run python:lint           # ruff check
 devenv tasks run python:format-check   # ruff format --check
 devenv tasks run python:typecheck      # mypy --strict
-devenv tasks run shellcheck:lint       # shellcheck on tmux-sessions.tmux
+devenv tasks run shellcheck:lint       # shellcheck on tmux-worktree-sessions.tmux
 ```
 
 For tighter feedback loops, invoke the underlying tool directly:
@@ -64,10 +64,10 @@ uv run pytest tests/python -k worktree      # filter by name
 ## Smoke-checking the plugin
 
 ```sh
-TMUX_SESSIONS_PROJECTS_DIRS="$HOME/Projects" \
-TMUX_SESSIONS_ICON_STYLE=nerd \
+TWS_PROJECTS_DIRS="$HOME/Projects" \
+TWS_ICON_STYLE=nerd \
 PYTHONPATH=scripts \
-python3 -m tmux_sessions sessions manage
+python3 -m tmux_worktree_sessions sessions manage
 ```
 
 ## Tests
@@ -84,7 +84,7 @@ When adding a feature or fixing a bug, add coverage under
 
 ## Linting
 
-- **shellcheck** — runs over `tmux-sessions.tmux` (the only remaining
+- **shellcheck** — runs over `tmux-worktree-sessions.tmux` (the only remaining
   shell file) via the `shellcheck:lint` task. Severity is `warning`;
   address every warning before commit. Suppress with
   `# shellcheck disable=SCxxxx` only when the warning is a known
@@ -94,7 +94,7 @@ When adding a feature or fixing a bug, add coverage under
   `pyproject.toml` under `[tool.ruff]` (line length 120,
   `target-version = py38`, rule set `E,F,I,UP,B,SIM`).
 - **mypy** — runs `mypy --strict` against
-  `scripts/tmux_sessions`. Every Python function signature must have
+  `scripts/tmux_worktree_sessions`. Every Python function signature must have
   explicit type annotations.
 
 ## Dependency management
@@ -113,7 +113,7 @@ uv lock --upgrade                    # refresh the lockfile
 ```
 
 There are zero runtime Python dependencies — the plugin invokes the
-package via `python3 -m tmux_sessions` and assumes only the standard
+package via `python3 -m tmux_worktree_sessions` and assumes only the standard
 library at runtime.
 
 ### System tools
@@ -140,8 +140,8 @@ devenv.nix                    # packages + python.uv + tasks + enterTest
 devenv.yaml                   # Nix input pinning (devenv-nixpkgs/rolling)
 pyproject.toml                # PEP 735 dev deps, ruff/mypy/pytest config
 uv.lock                       # uv lockfile (committed)
-tmux-sessions.tmux            # TPM entry point (bash; binds the picker key)
-scripts/tmux_sessions/        # typed Python package
+tmux-worktree-sessions.tmux            # TPM entry point (bash; binds the picker key)
+scripts/tmux_worktree_sessions/        # typed Python package
 tests/python/                 # pytest suite covering the package
 tests/python/_stubs/          # programmable tmux/fzf/curl stubs
 docs/python-migration.md      # migration history

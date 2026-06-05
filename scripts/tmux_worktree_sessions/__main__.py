@@ -1,4 +1,4 @@
-"""CLI dispatcher for the tmux_sessions package.
+"""CLI dispatcher for the tmux_worktree_sessions package.
 
 Only the four subcommands actually invoked from production are
 registered here:
@@ -57,38 +57,36 @@ class Config:
     @classmethod
     def from_env(cls) -> Config:
         home = os.environ.get("HOME", "")
-        raw_dirs = os.environ.get("TMUX_SESSIONS_PROJECTS_DIRS") or f"{home}/Projects"
+        raw_dirs = os.environ.get("TWS_PROJECTS_DIRS") or f"{home}/Projects"
         roots: list[Path] = []
         for entry in raw_dirs.split():
             expanded = entry.replace("~", home, 1) if entry.startswith("~") else entry
             roots.append(Path(expanded))
 
         score_file_str = (
-            os.environ.get("SCORE_FILE")
-            or os.environ.get("TMUX_SESSIONS_SCORES_FILE")
-            or f"{home}/.local/share/tmux-sessions/scores.tsv"
+            os.environ.get("SCORE_FILE") or os.environ.get("TWS_SCORES_FILE") or f"{home}/.local/share/tws/scores.tsv"
         )
 
-        half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
+        half_life_days = float(os.environ.get("TWS_SCORE_HALF_LIFE") or 14)
 
         return cls(
             home=home,
             projects_roots=roots,
-            max_depth=int(os.environ.get("TMUX_SESSIONS_MAX_DEPTH") or 6),
-            strip_prefixes=(os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split(),
-            manual_spec=os.environ.get("TMUX_SESSIONS_MANUAL_SESSIONS") or "",
+            max_depth=int(os.environ.get("TWS_MAX_DEPTH") or 6),
+            strip_prefixes=(os.environ.get("TWS_STRIP_PREFIXES") or "").split(),
+            manual_spec=os.environ.get("TWS_MANUAL_SESSIONS") or "",
             half_life_secs=half_life_days * 24 * 3600,
-            path_boost=float(os.environ.get("TMUX_SESSIONS_SCORE_PATH_BOOST") or 1.0),
+            path_boost=float(os.environ.get("TWS_SCORE_PATH_BOOST") or 1.0),
             score_file=Path(score_file_str),
-            icons=picker.IconSet.from_style(os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"),
-            default_branch_fallback=os.environ.get("TMUX_SESSIONS_DEFAULT_BRANCH") or "main",
+            icons=picker.IconSet.from_style(os.environ.get("TWS_ICON_STYLE") or "nerd"),
+            default_branch_fallback=os.environ.get("TWS_DEFAULT_BRANCH") or "main",
         )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="tmux_sessions",
-        description="tmux-sessions Python helpers",
+        prog="tmux_worktree_sessions",
+        description="tmux-worktree-sessions Python helpers",
     )
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
@@ -470,7 +468,7 @@ def _bump_score_and_switch(name: str, session_path: Path, *, cfg: Config) -> Non
 
 def _fetch_reload_argv() -> list[str]:
     """Argv prefix for invoking the in-package fetch-reload subcommand."""
-    return [sys.executable, "-m", "tmux_sessions", "fetch-reload"]
+    return [sys.executable, "-m", "tmux_worktree_sessions", "fetch-reload"]
 
 
 def cmd_sessions_manage(args: argparse.Namespace) -> int:
@@ -478,7 +476,7 @@ def cmd_sessions_manage(args: argparse.Namespace) -> int:
     cfg = Config.from_env()
     # Children spawned by fzf binds re-resolve via Config.from_env(), so
     # propagate the resolved score-file path through SCORE_FILE in case
-    # only TMUX_SESSIONS_SCORES_FILE was set at parent entry.
+    # only TWS_SCORES_FILE was set at parent entry.
     os.environ["SCORE_FILE"] = str(cfg.score_file)
 
     with tempfile.NamedTemporaryFile("w", delete=False, suffix=".entries") as initial:
@@ -499,7 +497,7 @@ def _manage_loop(tmpfile: Path, *, cfg: Config) -> int:
     # subshell fzf spawns. The inline {1}/{2}/{n} placeholders are
     # interpolated by fzf at runtime; the rest of the command line is
     # escaped so paths with spaces survive fzf's shell-style execute().
-    action_cmd_prefix = f"{shlex.quote(sys.executable)} -m tmux_sessions sessions action "
+    action_cmd_prefix = f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions sessions action "
     quoted_tmpfile = shlex.quote(str(tmpfile))
     bind_ctrl_d = (
         f"ctrl-d:execute({action_cmd_prefix}ctrl-d {{1}} {{2}} {quoted_tmpfile})"

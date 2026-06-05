@@ -1,4 +1,4 @@
-"""Tests for :mod:`tmux_sessions.sessions`.
+"""Tests for :mod:`tmux_worktree_sessions.sessions`.
 
 Pure-layer cases for ``parse_manual_sessions``, ``list_projects``,
 ``is_orphaned_worktree``, ``build_entries``, and the action-row
@@ -14,9 +14,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from tmux_sessions.__main__ import main
-from tmux_sessions.picker import IconSet
-from tmux_sessions.sessions import (
+from tmux_worktree_sessions.__main__ import main
+from tmux_worktree_sessions.picker import IconSet
+from tmux_worktree_sessions.sessions import (
     apply_ctrl_r_session_rename,
     apply_ctrl_x,
     build_entries,
@@ -200,7 +200,7 @@ def test_cli_action_ctrl_x_rewrites_tmpfile(
     tmp_path: Path,
     tmux_stub: Callable[..., object],
 ) -> None:
-    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     tmux_stub(sessions="alpha\t$3\t/p/alpha")
     tmpfile = tmp_path / "entries"
     tmpfile.write_text("s\t3\talpha\talpha\np\t/p/other\tother\tother\nn\t\tnew session\tnew session\n")
@@ -221,7 +221,7 @@ def test_cli_action_ctrl_x_non_session_is_noop(
     tmp_path: Path,
     tmux_stub: Callable[..., object],
 ) -> None:
-    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     tmux_stub()
     tmpfile = tmp_path / "entries"
     before = "p\t/p/foo\tfoo\tfoo\n"
@@ -346,7 +346,7 @@ def test_build_entries_filters_projects_matching_open_sessions(
     tmux_stub: Callable[..., object],
     make_repo: Callable[..., Path],
 ) -> None:
-    from tmux_sessions.text import format_session_name
+    from tmux_worktree_sessions.text import format_session_name
 
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
@@ -405,7 +405,7 @@ def test_cli_action_ctrl_r_session_non_worktree_calls_tmux_rename(
     tmux_stub: Callable[..., object],
     fzf_stub: object,
 ) -> None:
-    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     plain = tmp_path / "plain"
     plain.mkdir()
     stub = tmux_stub(sessions=f"alpha\t$3\t{plain}")
@@ -427,7 +427,7 @@ def test_cli_action_ctrl_r_project_non_worktree_displays_warning(
     tmp_path: Path,
     tmux_stub: Callable[..., object],
 ) -> None:
-    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     plain = tmp_path / "plain"
     plain.mkdir()
     stub = tmux_stub()
@@ -489,7 +489,7 @@ def test_cli_action_ctrl_d_session_with_worktree_kills_and_removes(
     tmux_stub: Callable[..., object],
     make_repo: Callable[..., Path],
 ) -> None:
-    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     repo = make_repo("r", with_remote=True)
     wt = tmp_path / "wt" / "feature"
     _mkworktree(repo, "feature", wt)
@@ -513,7 +513,7 @@ def test_cli_action_ctrl_d_session_only_path_kills_and_strips(
     tmp_path: Path,
     tmux_stub: Callable[..., object],
 ) -> None:
-    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     plain = tmp_path / "plain"
     plain.mkdir()
     stub = tmux_stub(sessions=f"plain\t$7\t{plain}")
@@ -535,7 +535,7 @@ def test_cli_action_ctrl_d_project_linked_worktree_removes(
     tmp_path: Path,
     make_repo: Callable[..., Path],
 ) -> None:
-    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     repo = make_repo("r", with_remote=True)
     wt = tmp_path / "wt" / "feature"
     _mkworktree(repo, "feature", wt)
@@ -557,7 +557,7 @@ def test_cli_action_ctrl_d_orphan_dir_yes_deletes(
     fzf_stub: object,
     make_repo: Callable[..., Path],
 ) -> None:
-    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     make_repo("wt/realrepo")
     orphan = tmp_path / "wt" / "orphan"
     orphan.mkdir(parents=True)
@@ -579,7 +579,7 @@ def test_cli_action_ctrl_d_orphan_dir_no_keeps(
     fzf_stub: object,
     make_repo: Callable[..., Path],
 ) -> None:
-    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     make_repo("wt/realrepo")
     orphan = tmp_path / "wt" / "orphan"
     orphan.mkdir(parents=True)
@@ -599,7 +599,7 @@ def test_cli_action_ctrl_d_non_orphan_non_worktree_displays_message(
     tmp_path: Path,
     tmux_stub: Callable[..., object],
 ) -> None:
-    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     notes = tmp_path / "lonely" / "notes"
     notes.mkdir(parents=True)
     stub = tmux_stub()
@@ -621,7 +621,7 @@ def test_cli_display_name_returns_derived_when_normalises(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("TMUX_SESSIONS_STRIP_PREFIXES", "")
+    monkeypatch.setenv("TWS_STRIP_PREFIXES", "")
     stdout = io.StringIO()
     monkeypatch.setattr("sys.stdout", stdout)
 
@@ -635,7 +635,7 @@ def test_cli_display_name_falls_back_to_raw_on_mismatch(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("TMUX_SESSIONS_STRIP_PREFIXES", "")
+    monkeypatch.setenv("TWS_STRIP_PREFIXES", "")
     stdout = io.StringIO()
     monkeypatch.setattr("sys.stdout", stdout)
 
@@ -654,13 +654,13 @@ def test_cli_manage_invokes_fzf_with_popup_args(
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("TMUX_SESSIONS_PROJECTS_DIRS", str(projects_dir))
-    monkeypatch.setenv("TMUX_SESSIONS_MAX_DEPTH", "4")
-    monkeypatch.setenv("TMUX_SESSIONS_STRIP_PREFIXES", "")
-    monkeypatch.setenv("TMUX_SESSIONS_MANUAL_SESSIONS", "")
-    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
-    monkeypatch.setenv("TMUX_SESSIONS_SCORE_HALF_LIFE", "14")
-    monkeypatch.setenv("TMUX_SESSIONS_SCORE_PATH_BOOST", "1.0")
+    monkeypatch.setenv("TWS_PROJECTS_DIRS", str(projects_dir))
+    monkeypatch.setenv("TWS_MAX_DEPTH", "4")
+    monkeypatch.setenv("TWS_STRIP_PREFIXES", "")
+    monkeypatch.setenv("TWS_MANUAL_SESSIONS", "")
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
+    monkeypatch.setenv("TWS_SCORE_HALF_LIFE", "14")
+    monkeypatch.setenv("TWS_SCORE_PATH_BOOST", "1.0")
     monkeypatch.setenv("SCORE_FILE", str(tmp_path / "scores.tsv"))
     tmux_stub(sessions="")
     fzf_stub.esc()  # type: ignore[attr-defined]

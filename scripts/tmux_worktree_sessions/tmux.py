@@ -1,9 +1,9 @@
-"""tmux subprocess wrappers for tmux-sessions.
+"""tmux subprocess wrappers for tmux-worktree-sessions.
 
 Functions in this module shell out to a real ``tmux`` process and take
 all inputs as explicit parameters. Per the migration plan, subprocess
 calls are external state queries and live in the pure layer; the CLI
-layer in :mod:`tmux_sessions.__main__` is a one-line passthrough that
+layer in :mod:`tmux_worktree_sessions.__main__` is a one-line passthrough that
 only resolves env-driven defaults.
 """
 

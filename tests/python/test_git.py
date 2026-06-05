@@ -1,4 +1,4 @@
-"""Pure-layer tests for :mod:`tmux_sessions.git`.
+"""Pure-layer tests for :mod:`tmux_worktree_sessions.git`.
 
 Cases that exercise the subprocess-backed helpers (``resolve_remote``,
 ``default_branch``, ``list_branches``, worktree helpers, …) spin up
@@ -12,7 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from tmux_sessions.git import (
+from tmux_worktree_sessions.git import (
     add_worktree,
     branch_to_dir,
     default_branch,

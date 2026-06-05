@@ -17,9 +17,9 @@ uv run pytest tests/python -k worktree    # filter by name
 ```
 
 The plugin's logic lives in a typed Python package under
-`scripts/tmux_sessions/`. Python ≥ 3.8 is required; all Python code
+`scripts/tmux_worktree_sessions/`. Python ≥ 3.8 is required; all Python code
 uses **explicit type annotations** on every function signature, and
-`mypy --strict` must pass. The bash side is now just `tmux-sessions.tmux`,
+`mypy --strict` must pass. The bash side is now just `tmux-worktree-sessions.tmux`,
 the TPM hook that reads tmux options and dispatches to the Python entry
 point.
 
@@ -28,11 +28,11 @@ point.
 Every bug fix and every new feature MUST:
 
 1. Update `tests/python/` to cover the changed behaviour, and `uv run pytest tests/python` MUST pass.
-2. Run shellcheck on `tmux-sessions.tmux` if you touched it, and address every warning before commit. Suppress with `# shellcheck disable=SC####` only when the warning is a known false positive, and include a comment explaining why.
+2. Run shellcheck on `tmux-worktree-sessions.tmux` if you touched it, and address every warning before commit. Suppress with `# shellcheck disable=SC####` only when the warning is a known false positive, and include a comment explaining why.
 
 A change is not done until `devenv test` is green.
 
-- New function in `scripts/tmux_sessions/<module>.py` → add cases to `tests/python/test_<module>.py`.
+- New function in `scripts/tmux_worktree_sessions/<module>.py` → add cases to `tests/python/test_<module>.py`.
 - New external dependency invoked by the package → add a programmable stub under `tests/python/_stubs/` and a fixture hook in `tests/python/conftest.py`.
 - Regression fixes → add a failing test first, then make it pass.
 
@@ -42,12 +42,12 @@ CI runs `devenv test` on Linux and macOS for every push and pull request via `.g
 
 The plugin is one bash entry point and a Python package:
 
-- **`tmux-sessions.tmux`** — TPM entry point. Reads `@tmux-sessions-*` tmux options, expands literal `$HOME` in option values (tmux does not shell-expand them), and binds the trigger key via `run-shell` with all config passed as environment variables. The bound command invokes `python3 -m tmux_sessions sessions manage` with `PYTHONPATH` pointing at the plugin's `scripts/` directory.
+- **`tmux-worktree-sessions.tmux`** — TPM entry point. Reads `@tws-*` tmux options, expands literal `$HOME` in option values (tmux does not shell-expand them), and binds the trigger key via `run-shell` with all config passed as environment variables. The bound command invokes `python3 -m tmux_worktree_sessions sessions manage` with `PYTHONPATH` pointing at the plugin's `scripts/` directory.
 
-- **`scripts/tmux_sessions/`** — Typed Python package with the pure / CLI split called out in `docs/python-migration.md`:
+- **`scripts/tmux_worktree_sessions/`** — Typed Python package with the pure / CLI split called out in `docs/python-migration.md`:
   - `__main__.py` — argparse dispatcher with one `cmd_<group>_<verb>` handler per subcommand. Owns env reads, stdin/stdout, and file I/O.
   - `score.py`, `text.py`, `git.py`, `tmux.py`, `picker.py`, `fetch_reload.py`, `sessions.py` — pure modules; functions take all inputs as explicit (often keyword-only) parameters.
-  - `sessions.build_entries` emits the 4-column TSV (`type<TAB>key<TAB>search<TAB>display`) the picker consumes. `cmd_sessions_manage` runs the fzf loop and dispatches on the selected key. Ctrl-D/X/R actions re-invoke `python3 -m tmux_sessions sessions action <name> ...` via fzf's `execute`/`execute-silent` bindings so they can mutate a shared tmpfile without blocking the picker.
+  - `sessions.build_entries` emits the 4-column TSV (`type<TAB>key<TAB>search<TAB>display`) the picker consumes. `cmd_sessions_manage` runs the fzf loop and dispatches on the selected key. Ctrl-D/X/R actions re-invoke `python3 -m tmux_worktree_sessions sessions action <name> ...` via fzf's `execute`/`execute-silent` bindings so they can mutate a shared tmpfile without blocking the picker.
   - `fetch_reload.fetch_and_reload` is the background helper called from the branch picker via fzf `execute-silent`: runs `git fetch`, regenerates the branch list, and sends fzf a reload command over its `--listen` port.
 
 ## Key conventions

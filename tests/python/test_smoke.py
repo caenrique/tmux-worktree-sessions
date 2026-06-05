@@ -12,7 +12,7 @@ def test_dispatcher_prints_usage() -> None:
     env["PYTHONPATH"] = str(repo_root / "scripts")
 
     result = subprocess.run(
-        [sys.executable, "-m", "tmux_sessions"],
+        [sys.executable, "-m", "tmux_worktree_sessions"],
         capture_output=True,
         text=True,
         check=False,
