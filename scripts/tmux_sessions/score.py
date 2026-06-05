@@ -6,16 +6,18 @@ orders TSV input lines by current score (highest first), optionally
 adding a path-similarity boost so same-repo worktrees outrank
 same-org projects.
 
-This module is the **pure layer** — it never touches ``os.environ``,
-``sys.stdin``/``stdout``, ``argparse``, the wall clock, or files. The
-CLI layer in ``tmux_sessions.__main__`` resolves those concerns and
-calls the functions below with explicit parameters.
+The functions below take all inputs as explicit parameters; the CLI
+layer in ``tmux_sessions.__main__`` resolves env vars / wall-clock /
+stdin/stdout. ``bump_in_file`` is the one place that owns score-file
+I/O, replacing what would otherwise be a duplicated read/parse/merge/
+atomic-rewrite dance at every call site.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Iterable
+from pathlib import Path
 
 
 def common_prefix_len(a: str, b: str) -> int:
@@ -102,6 +104,31 @@ def format_score_table(entries: list[tuple[str, float, float]]) -> str:
         return ""
     lines = [f"{name}\t{_format_number(score)}\t{_format_number(ts)}" for name, score, ts in entries]
     return "\n".join(lines) + "\n"
+
+
+def bump_in_file(
+    path: Path,
+    *,
+    name: str,
+    now: float,
+    half_life_secs: float,
+) -> None:
+    """Read, decay-and-merge, atomically rewrite the score file.
+
+    Creates the parent directory if missing; treats a missing file as
+    empty input. Writes through a sibling ``.tmp`` then ``replace`` so
+    a crash mid-write cannot leave a half-written score file.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        existing = path.read_text()
+    except FileNotFoundError:
+        existing = ""
+    entries = parse_score_table(existing)
+    new_entries = merge_score(entries, name=name, now=now, half_life_secs=half_life_secs)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(format_score_table(new_entries))
+    tmp.replace(path)
 
 
 def sort_rows(

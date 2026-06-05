@@ -478,23 +478,15 @@ def _prompt_new_session_name() -> str:
 
 def _bump_score_and_switch(name: str, session_path: Path) -> None:
     """Bump the recency score for ``name`` and switch to (or create) the session."""
-    score_file = Path(os.environ.get("SCORE_FILE", ""))
-    half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
-    half_life_secs = half_life_days * 24 * 3600
-    now = float(int(time.time()))
-
-    if score_file:
-        score_file.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            text_in = score_file.read_text()
-        except FileNotFoundError:
-            text_in = ""
-        entries = score.parse_score_table(text_in)
-        new_entries = score.merge_score(entries, name=name, now=now, half_life_secs=half_life_secs)
-        tmp = score_file.with_name(score_file.name + ".tmp")
-        tmp.write_text(score.format_score_table(new_entries))
-        tmp.replace(score_file)
-
+    score_file_env = os.environ.get("SCORE_FILE", "")
+    if score_file_env:
+        half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
+        score.bump_in_file(
+            Path(score_file_env),
+            name=name,
+            now=float(int(time.time())),
+            half_life_secs=half_life_days * 24 * 3600,
+        )
     tmux.switch_or_create(session_path, name)
 
 

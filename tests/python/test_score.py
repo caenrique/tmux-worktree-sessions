@@ -1,15 +1,17 @@
-"""Pure-layer tests for the four bats `sort_by_score` scenarios.
+"""Pure-layer tests for the score module.
 
-These exercise the underlying Python logic in-process. The bats cases
-exercise the bash shim end-to-end; the CLI handler is covered by
-`test_score_cli.py`.
+Cover the ranking logic (``sort_rows`` / ``current_scores``), the score-
+table parser/serialiser, the ``merge_score`` decay-and-increment, and
+the ``bump_in_file`` atomic rewrite.
 """
 
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from tmux_sessions.score import (
+    bump_in_file,
     current_scores,
     format_score_table,
     merge_score,
@@ -128,3 +130,34 @@ def test_format_score_table_integer_floats_render_without_decimal() -> None:
 
 def test_format_score_table_empty_input_returns_empty() -> None:
     assert format_score_table([]) == ""
+
+
+def test_bump_in_file_creates_parent_directory_when_missing(tmp_path: Path) -> None:
+    score_file = tmp_path / "nested" / "dir" / "scores.tsv"
+
+    bump_in_file(score_file, name="alpha", now=NOW, half_life_secs=HALF_LIFE_SECS)
+
+    assert score_file.is_file()
+
+
+def test_bump_in_file_writes_score_one_for_fresh_entry(tmp_path: Path) -> None:
+    score_file = tmp_path / "scores.tsv"
+
+    bump_in_file(score_file, name="alpha", now=NOW, half_life_secs=HALF_LIFE_SECS)
+
+    assert score_file.read_text() == f"alpha\t1\t{int(NOW)}\n"
+
+
+def test_bump_in_file_decays_and_increments_existing_entry(tmp_path: Path) -> None:
+    score_file = tmp_path / "scores.tsv"
+    one_half_life_ago = NOW - HALF_LIFE_SECS
+    score_file.write_text(f"alpha\t4\t{int(one_half_life_ago)}\n")
+
+    bump_in_file(score_file, name="alpha", now=NOW, half_life_secs=HALF_LIFE_SECS)
+
+    entries = parse_score_table(score_file.read_text())
+    assert len(entries) == 1
+    name, value, ts = entries[0]
+    assert name == "alpha"
+    assert ts == NOW
+    assert math.isclose(value, 3.0, abs_tol=0.01)  # 4 * 0.5 + 1 = 3
