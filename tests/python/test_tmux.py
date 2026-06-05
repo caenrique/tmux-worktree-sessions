@@ -1,7 +1,9 @@
 """Tests for :mod:`tmux_worktree_sessions.tmux`.
 
-Covers ``session_id`` and ``switch_or_create``. The tmux stub at
-``tests/python/_stubs/tmux`` is loaded via the ``tmux_stub`` fixture.
+Covers ``session_id``, ``switch_or_create``, and the thin API helpers
+(``session_path``, ``kill_session``, ``rename_session``, ``switch_client``,
+``flash_message``). The tmux stub at ``tests/python/_stubs/tmux`` is
+loaded via the ``tmux_stub`` fixture.
 """
 
 from __future__ import annotations
@@ -9,7 +11,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from tmux_worktree_sessions.tmux import session_id, switch_or_create
+from tmux_worktree_sessions.tmux import (
+    flash_message,
+    kill_session,
+    rename_session,
+    session_id,
+    session_path,
+    switch_client,
+    switch_or_create,
+)
 
 from .conftest import TmuxStub
 
@@ -47,3 +57,43 @@ def test_switch_or_create_creates_new_session_when_unknown(
     invocations = stub.invocations()
     assert any(call[1:6] == ["new-session", "-c", "/tmp/fresh", "-s", "fresh"] for call in invocations)
     assert ["tmux", "switch-client", "-t", "$42"] in invocations
+
+
+def test_session_path_returns_session_dir(tmux_stub: Callable[..., TmuxStub]) -> None:
+    tmux_stub(sessions="alpha\t$3\t/tmp/alpha")
+    assert session_path("$3") == "/tmp/alpha"
+
+
+def test_session_path_unknown_target_returns_empty(tmux_stub: Callable[..., TmuxStub]) -> None:
+    tmux_stub(sessions="")
+    assert session_path("$99") == ""
+
+
+def test_kill_session_invokes_tmux(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    kill_session("$5")
+    assert ["tmux", "kill-session", "-t", "$5"] in stub.invocations()
+
+
+def test_rename_session_invokes_tmux(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    rename_session("$5", "fresh")
+    assert ["tmux", "rename-session", "-t", "$5", "fresh"] in stub.invocations()
+
+
+def test_switch_client_invokes_tmux(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    switch_client("$7")
+    assert ["tmux", "switch-client", "-t", "$7"] in stub.invocations()
+
+
+def test_flash_message_uses_default_duration(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    flash_message("hello")
+    assert ["tmux", "display-message", "-d", "2000", "hello"] in stub.invocations()
+
+
+def test_flash_message_honours_custom_duration(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    flash_message("hello", duration_ms=500)
+    assert ["tmux", "display-message", "-d", "500", "hello"] in stub.invocations()

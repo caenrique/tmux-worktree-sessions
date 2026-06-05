@@ -8,47 +8,20 @@ so fzf swaps in the fresh list.
 
 Every input is an explicit parameter — no ``os.environ`` or
 ``time.time()`` reads. Fork/detach lives in the CLI handler.
-
-Why curl, not ``urllib.request``: ``curl`` is already a documented
-runtime dep of the plugin and the test stub captures every POST
-verbatim, so the wire output is exercised end-to-end without any
-HTTP-level mocking.
 """
 
 from __future__ import annotations
 
 import shlex
-import subprocess
 import threading
 from pathlib import Path
 
+from . import curl, git
 from .picker import IconSet, gen_branch_picker_entries
 
 _SPIN_FRAMES: str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 _SPIN_INITIAL_DELAY_S: float = 0.3
 _SPIN_INTERVAL_S: float = 0.12
-
-
-def _curl_post(port: int, body: str, *, max_time: float) -> None:
-    """POST ``body`` to fzf's ``--listen`` port, swallowing all errors.
-
-    Failures are intentionally silent so a missed spinner frame or a
-    torn-down listener never bubbles up to the picker.
-    """
-    subprocess.run(
-        [
-            "curl",
-            "-s",
-            "--max-time",
-            str(max_time),
-            "-XPOST",
-            f"localhost:{port}",
-            "-d",
-            body,
-        ],
-        check=False,
-        capture_output=True,
-    )
 
 
 def _spinner_loop(stop: threading.Event, *, port: int, header_base: str) -> None:
@@ -64,7 +37,7 @@ def _spinner_loop(stop: threading.Event, *, port: int, header_base: str) -> None
     i = 0
     while not stop.is_set():
         frame = _SPIN_FRAMES[i % len(_SPIN_FRAMES)]
-        _curl_post(
+        curl.post(
             port,
             f"change-header({header_base} {frame} fetching...)",
             max_time=0.5,
@@ -102,11 +75,7 @@ def fetch_and_reload(
     )
     spinner.start()
     try:
-        subprocess.run(
-            ["git", "-C", str(repo), "fetch", "--all", "--quiet"],
-            check=False,
-            capture_output=True,
-        )
+        git.fetch_all(repo)
         with tmpfile.open("w") as f:
             for line in gen_branch_picker_entries(
                 repo,
@@ -121,7 +90,7 @@ def fetch_and_reload(
         spinner.join()
 
     quoted = shlex.quote(str(tmpfile))
-    _curl_post(
+    curl.post(
         port,
         f"change-header({header_base})+reload(cat {quoted})",
         max_time=2.0,

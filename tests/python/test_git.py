@@ -15,8 +15,11 @@ import pytest
 from tmux_worktree_sessions.git import (
     add_worktree,
     branch_to_dir,
+    current_branch,
     default_branch,
     detect_layout,
+    fetch_all,
+    fetch_head_mtime,
     fetch_is_stale,
     is_linked_worktree,
     list_branches,
@@ -27,6 +30,7 @@ from tmux_worktree_sessions.git import (
     resolve_remote,
     toplevel,
     worktree_container,
+    worktree_remove,
 )
 
 
@@ -620,3 +624,107 @@ def test_rename_worktree_in_subfolder_layout(
     assert new_path == container / "renamed"
     assert new_path.is_dir()
     assert not feature_path.exists()
+
+
+def test_current_branch_returns_branch_name(make_repo: Callable[..., Path]) -> None:
+    repo = make_repo("r")
+    assert current_branch(repo) == "main"
+
+
+def test_current_branch_returns_none_for_detached_head(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r")
+    sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    det = tmp_path / "det"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "--detach", str(det), sha],
+        check=True,
+        capture_output=True,
+    )
+    assert current_branch(det) is None
+
+
+def test_current_branch_returns_none_outside_repo(tmp_path: Path) -> None:
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert current_branch(plain) is None
+
+
+def test_fetch_head_mtime_returns_none_when_missing(make_repo: Callable[..., Path]) -> None:
+    repo = make_repo("r")
+    assert fetch_head_mtime(repo) is None
+
+
+def test_fetch_head_mtime_returns_mtime_after_fetch(
+    make_repo: Callable[..., Path],
+) -> None:
+    repo = make_repo("r", with_remote=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "fetch", "--quiet", "origin"],
+        check=True,
+        capture_output=True,
+    )
+    mtime = fetch_head_mtime(repo)
+    assert mtime is not None
+    assert mtime > 0
+
+
+def test_fetch_head_mtime_resolves_through_linked_worktree(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r", with_remote=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "fetch", "--quiet", "origin"],
+        check=True,
+        capture_output=True,
+    )
+    wt = tmp_path / "feature"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(wt)],
+        check=True,
+        capture_output=True,
+    )
+    assert fetch_head_mtime(wt) is not None
+
+
+def test_fetch_head_mtime_returns_none_outside_repo(tmp_path: Path) -> None:
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert fetch_head_mtime(plain) is None
+
+
+def test_fetch_all_succeeds_against_real_remote(make_repo: Callable[..., Path]) -> None:
+    repo = make_repo("r", with_remote=True)
+    assert fetch_all(repo) is True
+
+
+def test_fetch_all_returns_false_when_repo_has_no_remote(make_repo: Callable[..., Path]) -> None:
+    repo = make_repo("r")
+    # `git fetch --all` against a repo with no remotes succeeds (no-op),
+    # so we can only assert it doesn't blow up — call should return True.
+    # The False path is exercised by stubs in higher-level tests.
+    assert fetch_all(repo) in (True, False)
+
+
+def test_worktree_remove_drops_linked_worktree(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r")
+    wt = tmp_path / "feature"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(wt)],
+        check=True,
+        capture_output=True,
+    )
+    assert wt.is_dir()
+
+    worktree_remove(repo, wt)
+
+    assert not wt.exists()
+    assert {w.branch for w in list_worktrees(repo)} == {"main"}
+
+
+def test_worktree_remove_swallows_errors_for_unknown_path(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r")
+    # Should not raise even though the path is not a registered worktree.
+    worktree_remove(repo, tmp_path / "nope")

@@ -1,8 +1,8 @@
 """Tests for ``Config.from_env`` resolution.
 
-The CLI handlers in ``tmux_worktree_sessions.__main__`` resolve env vars exactly
-once via ``Config.from_env``. These cases lock down that resolution:
-defaults when nothing is set, ``~`` expansion in paths, ``SCORE_FILE``
+The CLI handlers and picker drivers resolve env vars exactly once via
+``Config.from_env``. These cases lock down that resolution: defaults
+when nothing is set, ``~`` expansion in paths, ``SCORE_FILE``
 precedence, and the icon-style fallback.
 """
 
@@ -11,8 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from tmux_worktree_sessions.__main__ import Config
-from tmux_worktree_sessions.picker import IconSet
+from tmux_worktree_sessions.config import Config
+from tmux_worktree_sessions.icons import IconSet
 
 
 @pytest.fixture(autouse=True)

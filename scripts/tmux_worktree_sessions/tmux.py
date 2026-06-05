@@ -108,15 +108,55 @@ def pane_current_path() -> str:
     return _display_message("#{pane_current_path}")
 
 
-def _display_message(fmt: str) -> str:
-    result = subprocess.run(
-        ["tmux", "display-message", "-p", fmt],
-        capture_output=True,
-        text=True,
-    )
+def session_path(target: str) -> str:
+    """Return ``#{session_path}`` for ``target`` (e.g. ``"$3"``).
+
+    Returns the empty string when the lookup fails — typically because
+    the session id is unknown or tmux is not running.
+    """
+    return _display_message("#{session_path}", target=target)
+
+
+def _display_message(fmt: str, *, target: str | None = None) -> str:
+    cmd = ["tmux", "display-message", "-p"]
+    if target is not None:
+        cmd.extend(["-t", target])
+    cmd.append(fmt)
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         return ""
     return result.stdout.rstrip("\n")
+
+
+def kill_session(target: str) -> None:
+    """Kill the session ``target`` (id like ``"$3"``); errors are swallowed."""
+    subprocess.run(["tmux", "kill-session", "-t", target], capture_output=True)
+
+
+def rename_session(target: str, new_name: str) -> None:
+    """Rename ``target`` to ``new_name``; errors are swallowed."""
+    subprocess.run(
+        ["tmux", "rename-session", "-t", target, new_name],
+        capture_output=True,
+    )
+
+
+def switch_client(target: str) -> None:
+    """Switch the current client to ``target``; errors are swallowed.
+
+    Bare counterpart to :func:`switch_or_create` — used when the caller
+    already has a tmux session id (with leading ``$``) and just wants to
+    attach without conditional creation.
+    """
+    subprocess.run(["tmux", "switch-client", "-t", target], capture_output=True)
+
+
+def flash_message(message: str, *, duration_ms: int = 2000) -> None:
+    """Show a transient ``display-message`` banner; errors are swallowed."""
+    subprocess.run(
+        ["tmux", "display-message", "-d", str(duration_ms), message],
+        capture_output=True,
+    )
 
 
 def switch_or_create(session_path: Path, name: str) -> None:

@@ -94,6 +94,71 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def current_branch(path: Path) -> str | None:
+    """Return ``branch --show-current`` for ``path``, or ``None``.
+
+    Returns ``None`` for detached HEAD (git prints an empty line) and
+    for paths that aren't inside a git repo (non-zero exit). Callers
+    that want to distinguish those two cases can call ``toplevel``
+    first.
+    """
+    result = _git(path, "branch", "--show-current")
+    if result.returncode != 0:
+        return None
+    branch = result.stdout.strip()
+    return branch or None
+
+
+def fetch_head_mtime(repo: Path) -> float | None:
+    """Return the mtime of ``FETCH_HEAD`` for ``repo``, or ``None``.
+
+    Resolves ``--git-common-dir`` so the lookup is correct from inside a
+    linked worktree. Returns ``None`` when ``repo`` is not a git
+    directory or ``FETCH_HEAD`` does not exist yet.
+    """
+    result = _git(repo, "rev-parse", "--git-common-dir")
+    if result.returncode != 0:
+        return None
+    common_dir = Path(result.stdout.strip())
+    if not common_dir.is_absolute():
+        common_dir = repo / common_dir
+    fetch_head = common_dir / "FETCH_HEAD"
+    try:
+        return fetch_head.stat().st_mtime
+    except FileNotFoundError:
+        return None
+
+
+def fetch_all(repo: Path) -> bool:
+    """Run ``git fetch --all --quiet`` in ``repo``; return success.
+
+    Output is captured (not propagated) so callers can run this in the
+    background without spamming the terminal. A non-zero exit is returned
+    as ``False`` rather than raised — the picker treats network failures
+    as non-fatal and still reloads the local branch list.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(repo), "fetch", "--all", "--quiet"],
+        check=False,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def worktree_remove(repo: Path, wt_path: Path | str, *, force: bool = True) -> None:
+    """Run ``git worktree remove`` for ``wt_path``; errors are swallowed.
+
+    The ``--force`` flag is on by default to match the picker's
+    delete-without-prompt behaviour for a worktree that lost its
+    backing branch or has untracked files.
+    """
+    cmd = ["git", "-C", str(repo), "worktree", "remove"]
+    if force:
+        cmd.append("--force")
+    cmd.append(str(wt_path))
+    subprocess.run(cmd, capture_output=True)
+
+
 def toplevel(path: Path) -> Path | None:
     """Return ``rev-parse --show-toplevel`` for ``path``, or ``None``."""
     result = _git(path, "rev-parse", "--show-toplevel")
@@ -388,12 +453,7 @@ def rename_worktree(
     The interactive fzf rename prompt lives in the CLI dispatcher; this
     function only owns the post-prompt git/move/repair half.
     """
-    show = subprocess.run(
-        ["git", "-C", str(wt_path), "branch", "--show-current"],
-        capture_output=True,
-        text=True,
-    )
-    old_branch = show.stdout.strip() if show.returncode == 0 else ""
+    old_branch = current_branch(wt_path)
     if not old_branch:
         raise RuntimeError("Cannot rename: worktree is in detached HEAD state")
 

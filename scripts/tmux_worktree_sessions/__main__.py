@@ -1,18 +1,19 @@
 """CLI dispatcher for the tmux_worktree_sessions package.
 
-Only the four subcommands actually invoked from production are
-registered here:
+Only the subcommands actually invoked from production are registered
+here:
 
 * ``sessions manage`` — TPM key-bind entry point.
 * ``sessions display-name`` — status-bar helper (see README).
 * ``sessions action ctrl-x|ctrl-r|ctrl-d`` — fzf binds spawned inside
   the ``manage`` loop.
+* ``worktree manage`` — standalone branch picker for the current pane.
 * ``fetch-reload`` — fzf bind spawned inside ``picker.pick_branch``.
 
-The ``__main__`` module owns argparse plumbing, env-var resolution
-(via :class:`Config`), file I/O, and subprocess orchestration. The
-domain modules (``sessions``, ``picker``, ``git``, ``tmux``, ``score``,
-``text``, ``fetch_reload``) take all inputs as explicit parameters.
+The ``__main__`` module owns argparse plumbing and the thin glue
+between argparse and the picker UIs. Picker drivers live in
+:mod:`tmux_worktree_sessions.picker`; resolved env-config lives in
+:mod:`tmux_worktree_sessions.config`.
 """
 
 from __future__ import annotations
@@ -20,74 +21,15 @@ from __future__ import annotations
 import argparse
 import contextlib
 import os
-import secrets
-import shlex
-import subprocess
+import shutil
 import sys
 import tempfile
 import time
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 
 from . import fetch_reload, git, picker, score, sessions, text, tmux
-
-
-@dataclass(frozen=True)
-class Config:
-    """Env-driven knobs the picker and its action handlers consume.
-
-    Resolved once per process — the parent ``manage`` loop and each
-    action subprocess fzf spawns each call ``Config.from_env()`` at
-    entry. ``score_file`` is always resolved to a path (never ``None``)
-    so the bump path doesn't branch on configured-or-not.
-    """
-
-    home: str
-    projects_roots: list[Path]
-    max_depth: int
-    strip_prefixes: list[str]
-    manual_spec: str
-    half_life_secs: float
-    path_boost: float
-    score_file: Path
-    icons: picker.IconSet
-    default_branch_fallback: str
-    worktrees_dir: str
-    default_layout: git.ConcreteWorktreeLayout
-
-    @classmethod
-    def from_env(cls) -> Config:
-        home = os.environ.get("HOME", "")
-        raw_dirs = os.environ.get("TWS_PROJECTS_DIRS") or f"{home}/Projects"
-        roots: list[Path] = []
-        for entry in raw_dirs.split():
-            expanded = entry.replace("~", home, 1) if entry.startswith("~") else entry
-            roots.append(Path(expanded))
-
-        score_file_str = (
-            os.environ.get("SCORE_FILE") or os.environ.get("TWS_SCORES_FILE") or f"{home}/.local/share/tws/scores.tsv"
-        )
-
-        half_life_days = float(os.environ.get("TWS_SCORE_HALF_LIFE") or 14)
-
-        raw_layout = os.environ.get("TWS_DEFAULT_WORKTREE_LAYOUT") or "subfolder"
-        default_layout: git.ConcreteWorktreeLayout = "sibling" if raw_layout == "sibling" else "subfolder"
-
-        return cls(
-            home=home,
-            projects_roots=roots,
-            max_depth=int(os.environ.get("TWS_MAX_DEPTH") or 6),
-            strip_prefixes=(os.environ.get("TWS_STRIP_PREFIXES") or "").split(),
-            manual_spec=os.environ.get("TWS_MANUAL_SESSIONS") or "",
-            half_life_secs=half_life_days * 24 * 3600,
-            path_boost=float(os.environ.get("TWS_SCORE_PATH_BOOST") or 1.0),
-            score_file=Path(score_file_str),
-            icons=picker.IconSet.from_style(os.environ.get("TWS_ICON_STYLE") or "nerd"),
-            default_branch_fallback=os.environ.get("TWS_DEFAULT_BRANCH") or "main",
-            worktrees_dir=os.environ.get("TWS_WORKTREES_DIR") or ".worktrees",
-            default_layout=default_layout,
-        )
+from .config import Config
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -168,22 +110,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_worktree_container(repo: Path, main_wt: Path, *, cfg: Config) -> Path:
-    """Pick the right container for new/renamed worktrees of ``repo``.
-
-    Detects the existing layout from the repo's worktrees and falls back
-    to ``cfg.default_layout`` when the repo has no linked worktrees yet
-    (or its existing ones don't fit a single shape). The returned
-    directory is created with ``parents=True`` so subfolder layouts work
-    on the very first worktree.
-    """
-    detected = git.detect_layout(repo, worktrees_dir=cfg.worktrees_dir)
-    layout: git.ConcreteWorktreeLayout = cfg.default_layout if detected == "ambiguous" else detected
-    container = git.worktree_container(main_wt, layout=layout, worktrees_dir=cfg.worktrees_dir)
-    container.mkdir(parents=True, exist_ok=True)
-    return container
-
-
 def _read_text_or_empty(path: Path) -> str:
     try:
         return path.read_text()
@@ -243,54 +169,13 @@ def cmd_fetch_reload(args: argparse.Namespace) -> int:
         os._exit(1)
 
 
-def _prompt_rename(initial: str) -> str | None:
-    """Drive the inline fzf rename prompt; return sanitised name or None.
-
-    Empty stdin, free-text query, ``ctrl-bs`` cancel. Returns ``None``
-    on Esc, on ctrl-bs, or when sanitisation produces an empty string.
-    """
-    result = subprocess.run(
-        [
-            "fzf",
-            *picker.FZF_INLINE_FLAGS,
-            "--print-query",
-            "--no-select-1",
-            "--query",
-            initial,
-            "--prompt",
-            "Rename to: ",
-            "--header",
-            "enter:rename  ctrl-bs:cancel",
-            "--expect",
-            "ctrl-bs",
-        ],
-        input="",
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 130:
-        return None
-    out_lines = result.stdout.split("\n")
-    query = out_lines[0] if out_lines else ""
-    key = out_lines[1] if len(out_lines) > 1 else ""
-    if key == "ctrl-bs":
-        return None
-    sanitised = text.sanitize_name(query)
-    return sanitised or None
-
-
 def cmd_sessions_action_ctrl_x(args: argparse.Namespace) -> int:
     if args.type != "s":
         return 0
     cfg = Config.from_env()
     tmux_id = f"${args.id}"
-    sess_path_result = subprocess.run(
-        ["tmux", "display-message", "-p", "-t", tmux_id, "#{session_path}"],
-        capture_output=True,
-        text=True,
-    )
-    sess_path = sess_path_result.stdout.strip()
-    subprocess.run(["tmux", "kill-session", "-t", tmux_id], capture_output=True)
+    sess_path = tmux.session_path(tmux_id)
+    tmux.kill_session(tmux_id)
 
     tmpfile = Path(args.tmpfile)
     lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
@@ -300,17 +185,8 @@ def cmd_sessions_action_ctrl_x(args: argparse.Namespace) -> int:
 
 
 def cmd_sessions_action_ctrl_r(args: argparse.Namespace) -> int:
-    if args.type == "s":
-        tmux_id = f"${args.id}"
-        target_path_result = subprocess.run(
-            ["tmux", "display-message", "-p", "-t", tmux_id, "#{session_path}"],
-            capture_output=True,
-            text=True,
-        )
-        target_path = target_path_result.stdout.strip()
-    elif args.type == "p":
-        target_path = args.id
-    else:
+    target_path = _resolve_action_target(args.type, args.id)
+    if target_path is None:
         return 0
 
     cfg = Config.from_env()
@@ -318,136 +194,129 @@ def cmd_sessions_action_ctrl_r(args: argparse.Namespace) -> int:
     target = Path(target_path)
 
     if git.is_linked_worktree(target):
-        main_wt = git.main_worktree(target)
-        if main_wt is None:
-            return 0
-        container = _resolve_worktree_container(main_wt, main_wt, cfg=cfg)
-
-        old_branch_result = subprocess.run(
-            ["git", "-C", target_path, "branch", "--show-current"],
-            capture_output=True,
-            text=True,
-        )
-        old_branch = old_branch_result.stdout.strip()
-        if not old_branch:
-            sys.stderr.write("Cannot rename: worktree is in detached HEAD state\n")
-            return 1
-        new_name = _prompt_rename(old_branch)
-        if not new_name or new_name == old_branch:
-            return 0
-        try:
-            git.rename_worktree(main_wt, container, target, new_name=new_name)
-        except RuntimeError as exc:
-            sys.stderr.write(f"{exc}\n")
-            return 1
-        rebuilt = list(_build_entries_iter(cfg))
-        tmpfile.write_text("\n".join(rebuilt) + ("\n" if rebuilt else ""))
-        return 0
+        return _rename_worktree_action(target, target_path, tmpfile, cfg=cfg)
 
     if args.type == "s":
-        lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
-        clean_name = ""
-        for line in lines:
-            fields = line.split("\t")
-            if len(fields) >= 3 and fields[0] == "s" and fields[1] == args.id:
-                clean_name = fields[2]
-                break
-        new_name = _prompt_rename(clean_name)
-        if not new_name or new_name == clean_name:
-            return 0
-        tmux_id = f"${args.id}"
-        subprocess.run(
-            ["tmux", "rename-session", "-t", tmux_id, new_name],
-            capture_output=True,
-        )
-        new_lines = sessions.apply_ctrl_r_session_rename(lines, sid=args.id, new_name=new_name, icons=cfg.icons)
-        tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
-        return 0
+        return _rename_session_action(args.id, tmpfile, cfg=cfg)
 
-    subprocess.run(
-        ["tmux", "display-message", "-d", "2000", "ctrl-r: not a linked worktree"],
-        capture_output=True,
-    )
+    tmux.flash_message("ctrl-r: not a linked worktree")
     return 0
 
 
-def _confirm_orphan_delete(wt_path: str) -> bool:
-    """Drive the inline No/Yes fzf prompt for orphan-dir deletion."""
-    result = subprocess.run(
-        [
-            "fzf",
-            *picker.FZF_INLINE_FLAGS,
-            "--no-sort",
-            "--prompt",
-            f"Delete {Path(wt_path).name}? ",
-            "--header",
-            "directory is not git-linked — delete anyway?",
-        ],
-        input="No\nYes",
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0 and result.stdout.strip() == "Yes"
+def _resolve_action_target(row_type: str, row_id: str) -> str | None:
+    """Return the filesystem target of a ctrl-r/ctrl-d action row, or None."""
+    if row_type == "s":
+        return tmux.session_path(f"${row_id}")
+    if row_type == "p":
+        return row_id
+    return None
+
+
+def _rename_worktree_action(target: Path, target_path: str, tmpfile: Path, *, cfg: Config) -> int:
+    """Branch+directory rename for a linked worktree row; rebuild tmpfile on success."""
+    main_wt = git.main_worktree(target)
+    if main_wt is None:
+        return 0
+    container = picker.resolve_worktree_container(main_wt, main_wt, cfg=cfg)
+
+    old_branch = git.current_branch(target)
+    if not old_branch:
+        sys.stderr.write("Cannot rename: worktree is in detached HEAD state\n")
+        return 1
+    new_name = picker.prompt_rename(old_branch)
+    if not new_name or new_name == old_branch:
+        return 0
+    try:
+        git.rename_worktree(main_wt, container, target, new_name=new_name)
+    except RuntimeError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+    rebuilt = list(_build_entries_iter(cfg))
+    tmpfile.write_text("\n".join(rebuilt) + ("\n" if rebuilt else ""))
+    return 0
+
+
+def _rename_session_action(sid: str, tmpfile: Path, *, cfg: Config) -> int:
+    """Tmux ``rename-session`` for a session row; rewrite the tmpfile row in place."""
+    lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+    clean_name = _find_session_clean_name(lines, sid)
+    new_name = picker.prompt_rename(clean_name)
+    if not new_name or new_name == clean_name:
+        return 0
+    tmux.rename_session(f"${sid}", new_name)
+    new_lines = sessions.apply_ctrl_r_session_rename(lines, sid=sid, new_name=new_name, icons=cfg.icons)
+    tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+    return 0
+
+
+def _find_session_clean_name(lines: list[str], sid: str) -> str:
+    """Pull the search column off the matching ``s\\t<sid>`` row, or empty string."""
+    for line in lines:
+        fields = line.split("\t")
+        if len(fields) >= 3 and fields[0] == "s" and fields[1] == sid:
+            return fields[2]
+    return ""
 
 
 def cmd_sessions_action_ctrl_d(args: argparse.Namespace) -> int:
     tmpfile = Path(args.tmpfile)
 
     if args.type == "s":
-        tmux_id = f"${args.id}"
-        sess_path_result = subprocess.run(
-            ["tmux", "display-message", "-p", "-t", tmux_id, "#{session_path}"],
-            capture_output=True,
-            text=True,
-        )
-        sess_path = sess_path_result.stdout.strip()
-        subprocess.run(["tmux", "kill-session", "-t", tmux_id], capture_output=True)
-
-        lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
-        new_lines = sessions.remove_session_row(lines, sid=args.id)
-        tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
-
-        sess = Path(sess_path)
-        if git.is_linked_worktree(sess):
-            wt_repo = git.toplevel(sess)
-            if wt_repo is not None:
-                subprocess.run(
-                    ["git", "-C", str(wt_repo), "worktree", "remove", "--force", sess_path],
-                    capture_output=True,
-                )
-        return 0
-
+        return _ctrl_d_session_row(args.id, tmpfile)
     if args.type == "p":
-        wt_path = args.id
-        wt = Path(wt_path)
-        if not git.is_linked_worktree(wt):
-            if sessions.is_orphaned_worktree(wt, container=wt.parent):
-                if not _confirm_orphan_delete(wt_path):
-                    return 0
-                lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
-                new_lines = sessions.remove_project_row(lines, path=wt_path)
-                tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
-                subprocess.run(["rm", "-rf", wt_path], capture_output=True)
-            else:
-                subprocess.run(
-                    ["tmux", "display-message", "-d", "2000", "ctrl-d: not a linked worktree"],
-                    capture_output=True,
-                )
-            return 0
-
-        wt_repo = git.toplevel(wt)
-        if wt_repo is None:
-            return 0
-        lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
-        new_lines = sessions.remove_project_row(lines, path=wt_path)
-        tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
-        subprocess.run(
-            ["git", "-C", str(wt_repo), "worktree", "remove", "--force", wt_path],
-            capture_output=True,
-        )
-        return 0
-
+        return _ctrl_d_project_row(args.id, tmpfile)
     return 0
+
+
+def _ctrl_d_session_row(sid: str, tmpfile: Path) -> int:
+    """Kill the tmux session, drop its row, and remove its worktree if linked."""
+    tmux_id = f"${sid}"
+    sess_path = tmux.session_path(tmux_id)
+    tmux.kill_session(tmux_id)
+
+    lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+    new_lines = sessions.remove_session_row(lines, sid=sid)
+    tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+
+    sess = Path(sess_path)
+    if git.is_linked_worktree(sess):
+        wt_repo = git.toplevel(sess)
+        if wt_repo is not None:
+            git.worktree_remove(wt_repo, sess_path)
+    return 0
+
+
+def _ctrl_d_project_row(wt_path: str, tmpfile: Path) -> int:
+    """Drop the project row; remove its worktree (or an orphan dir after confirm)."""
+    wt = Path(wt_path)
+    if not git.is_linked_worktree(wt):
+        return _ctrl_d_orphan_or_flash(wt, wt_path, tmpfile)
+
+    wt_repo = git.toplevel(wt)
+    if wt_repo is None:
+        return 0
+    _drop_project_row(tmpfile, wt_path)
+    git.worktree_remove(wt_repo, wt_path)
+    return 0
+
+
+def _ctrl_d_orphan_or_flash(wt: Path, wt_path: str, tmpfile: Path) -> int:
+    """Either confirm-and-rmtree an orphan worktree, or flash an error."""
+    if not sessions.is_orphaned_worktree(wt, container=wt.parent):
+        tmux.flash_message("ctrl-d: not a linked worktree")
+        return 0
+    if not picker.confirm_orphan_delete(wt_path):
+        return 0
+    _drop_project_row(tmpfile, wt_path)
+    shutil.rmtree(wt_path, ignore_errors=True)
+    return 0
+
+
+def _drop_project_row(tmpfile: Path, wt_path: str) -> None:
+    """Rewrite ``tmpfile`` with the project row for ``wt_path`` removed."""
+    lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+    new_lines = sessions.remove_project_row(lines, path=wt_path)
+    tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
 
 
 def cmd_sessions_display_name(args: argparse.Namespace) -> int:
@@ -464,55 +333,6 @@ def cmd_sessions_display_name(args: argparse.Namespace) -> int:
     return 0
 
 
-def _prompt_new_session_name() -> str:
-    """Drive the inline fzf prompt for the new-session sentinel.
-
-    Returns the sanitised name, or ``""`` when the user cancels (Esc,
-    ctrl-bs, or empty input).
-    """
-    result = subprocess.run(
-        [
-            "fzf",
-            *picker.FZF_POPUP_FLAGS,
-            "--print-query",
-            "--no-select-1",
-            "--prompt",
-            "Session name: ",
-            "--header",
-            "enter:create  ctrl-bs:cancel",
-            "--expect",
-            "ctrl-bs",
-        ],
-        input="",
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 130:
-        return ""
-    out_lines = result.stdout.split("\n")
-    query = out_lines[0] if out_lines else ""
-    key = out_lines[1] if len(out_lines) > 1 else ""
-    if key == "ctrl-bs":
-        return ""
-    return text.sanitize_name(query)
-
-
-def _bump_score_and_switch(name: str, session_path: Path, *, cfg: Config) -> None:
-    """Bump the recency score for ``name`` and switch to (or create) the session."""
-    score.bump_in_file(
-        cfg.score_file,
-        name=name,
-        now=float(int(time.time())),
-        half_life_secs=cfg.half_life_secs,
-    )
-    tmux.switch_or_create(session_path, name)
-
-
-def _fetch_reload_argv() -> list[str]:
-    """Argv prefix for invoking the in-package fetch-reload subcommand."""
-    return [sys.executable, "-m", "tmux_worktree_sessions", "fetch-reload"]
-
-
 def cmd_sessions_manage(args: argparse.Namespace) -> int:
     """Run the top-level session picker fzf loop."""
     cfg = Config.from_env()
@@ -527,194 +347,10 @@ def cmd_sessions_manage(args: argparse.Namespace) -> int:
             initial.write(line + "\n")
 
     try:
-        return _manage_loop(tmpfile, cfg=cfg)
+        return picker.run_session_picker(tmpfile, cfg=cfg)
     finally:
         with contextlib.suppress(FileNotFoundError):
             tmpfile.unlink()
-
-
-def _manage_loop(tmpfile: Path, *, cfg: Config) -> int:
-    # Action binds re-invoke the dispatcher itself; using
-    # ``sys.executable`` keeps the venv's interpreter active in the
-    # subshell fzf spawns. The inline {1}/{2}/{n} placeholders are
-    # interpolated by fzf at runtime; the rest of the command line is
-    # escaped so paths with spaces survive fzf's shell-style execute().
-    action_cmd_prefix = f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions sessions action "
-    quoted_tmpfile = shlex.quote(str(tmpfile))
-    bind_ctrl_d = (
-        f"ctrl-d:execute({action_cmd_prefix}ctrl-d {{1}} {{2}} {quoted_tmpfile})"
-        f"+reload(cat {quoted_tmpfile})+pos({{n}})"
-    )
-    bind_ctrl_x = (
-        f"ctrl-x:execute-silent({action_cmd_prefix}ctrl-x {{1}} {{2}} {quoted_tmpfile})"
-        f"+reload(cat {quoted_tmpfile})+pos({{n}})"
-    )
-    bind_ctrl_r = (
-        f"ctrl-r:execute({action_cmd_prefix}ctrl-r {{1}} {{2}} {quoted_tmpfile})"
-        f"+reload(cat {quoted_tmpfile})+pos({{n}})"
-    )
-
-    while True:
-        with tmpfile.open("rb") as input_f:
-            result = subprocess.run(
-                [
-                    "fzf",
-                    *picker.FZF_POPUP_FLAGS,
-                    "--ansi",
-                    "--with-nth",
-                    "4",
-                    "--tiebreak=index",
-                    "--delimiter",
-                    "\t",
-                    "--prompt",
-                    "Sessions > ",
-                    "--expect",
-                    "ctrl-w,ctrl-bs",
-                    "--header",
-                    (
-                        "enter:open ctrl-bs:back ?:preview ctrl-x:delete-session "
-                        "ctrl-r:rename ctrl-w:worktree ctrl-d:remove-worktree"
-                    ),
-                    # No `--nth` here: fzf indexes `--nth` into the
-                    # post-`--with-nth` view, so any value finds nothing once
-                    # `--with-nth 4` collapses each row to a single field. We
-                    # rely on `--ansi` stripping SGR codes from field 4 before
-                    # matching.
-                    # Preview target is `'$'{2}`, not `'\$'{2}`: inside single
-                    # quotes the backslash survives literally, and tmux rejects
-                    # `\$<sid>` with "can't find pane".
-                    "--preview",
-                    ("[ '{1}' = s ] && tmux capture-pane -e -p -t '$'{2} 2>/dev/null || ls '{2}' 2>/dev/null"),
-                    "--preview-window",
-                    "down:50%:border-top:nofollow:hidden",
-                    "--bind",
-                    "?:toggle-preview",
-                    "--bind",
-                    bind_ctrl_d,
-                    "--bind",
-                    bind_ctrl_x,
-                    "--bind",
-                    bind_ctrl_r,
-                ],
-                stdin=input_f,
-                capture_output=True,
-                text=True,
-            )
-
-        if result.returncode == 130:
-            return 0
-        if not result.stdout:
-            return 0
-
-        out_lines = result.stdout.split("\n")
-        key = out_lines[0] if out_lines else ""
-        line = out_lines[1] if len(out_lines) > 1 else ""
-
-        if key == "ctrl-bs":
-            return 0
-
-        fields = line.split("\t")
-        row_type = fields[0] if fields else ""
-        key2 = fields[1] if len(fields) > 1 else ""
-        search = fields[2] if len(fields) > 2 else ""
-
-        if key == "ctrl-w":
-            if _handle_ctrl_w(row_type=row_type, key2=key2, cfg=cfg):
-                return 0
-            continue
-
-        if row_type == "n":
-            new_name = _prompt_new_session_name()
-            if not new_name:
-                continue
-            _bump_score_and_switch(new_name, Path(cfg.home), cfg=cfg)
-            return 0
-
-        if row_type == "p":
-            _bump_score_and_switch(search, Path(key2), cfg=cfg)
-            return 0
-
-        if row_type == "s":
-            subprocess.run(["tmux", "switch-client", "-t", f"${key2}"], capture_output=True)
-            return 0
-
-
-def _handle_ctrl_w(*, row_type: str, key2: str, cfg: Config) -> bool:
-    """Drive the ctrl-w (create-worktree) flow; return True to exit the loop."""
-    if row_type == "p":
-        repo_path = git.toplevel(Path(key2))
-    elif row_type == "s":
-        sess_path_result = subprocess.run(
-            ["tmux", "display-message", "-p", "-t", f"${key2}", "#{session_path}"],
-            capture_output=True,
-            text=True,
-        )
-        sess_path = sess_path_result.stdout.strip()
-        repo_path = git.toplevel(Path(sess_path)) if sess_path else None
-    else:
-        return False
-
-    if repo_path is None:
-        return False
-    return _open_worktree_picker(repo_path, cfg=cfg)
-
-
-def _open_worktree_picker(repo_path: Path, *, cfg: Config) -> bool:
-    """Drive the branch picker for ``repo_path``; return True to exit a parent loop.
-
-    Shared between the session-picker ctrl-w handler and the standalone
-    ``worktree manage`` entry point. Returns True when the user picked a
-    branch or pressed Esc, False when they pressed Ctrl-Backspace (which
-    only matters when there IS a parent picker to redraw).
-    """
-    main_wt = git.main_worktree(repo_path)
-    if main_wt is None:
-        return False
-    container = _resolve_worktree_container(repo_path, main_wt, cfg=cfg)
-
-    listen_port = 51200 + secrets.randbelow(14336)
-    session_paths = frozenset(s.path for s in tmux.list_sessions())
-    choice = picker.pick_branch(
-        repo_path,
-        icons=cfg.icons,
-        fetch_reload_argv=_fetch_reload_argv(),
-        listen_port=listen_port,
-        now=time.time(),
-        home=cfg.home,
-        strip_prefixes=cfg.strip_prefixes,
-        session_paths=session_paths,
-    )
-    if choice.kind == "cancel":
-        # Esc here is "close all" — return True so the caller exits 0
-        # instead of redrawing the parent picker.
-        return True
-    if choice.kind == "back":
-        return False
-
-    try:
-        if choice.kind == "new":
-            wt_path = git.add_worktree(
-                repo_path,
-                container,
-                branch=None,
-                new_name=choice.name,
-                default_branch_fallback=cfg.default_branch_fallback,
-            )
-        else:  # "existing"
-            wt_path = git.add_worktree(
-                repo_path,
-                container,
-                branch=choice.name,
-                new_name=None,
-                default_branch_fallback=cfg.default_branch_fallback,
-            )
-    except RuntimeError as exc:
-        sys.stderr.write(f"{exc}\n")
-        return False
-
-    name = text.format_session_name(str(wt_path), home=cfg.home, strip_prefixes=cfg.strip_prefixes)
-    _bump_score_and_switch(name, wt_path, cfg=cfg)
-    return True
 
 
 def cmd_worktree_manage(args: argparse.Namespace) -> int:
@@ -732,12 +368,9 @@ def cmd_worktree_manage(args: argparse.Namespace) -> int:
         return 0
     repo_path = git.toplevel(Path(pane_path))
     if repo_path is None:
-        subprocess.run(
-            ["tmux", "display-message", "-d", "2000", "worktree: not a git repo"],
-            capture_output=True,
-        )
+        tmux.flash_message("worktree: not a git repo")
         return 0
-    _open_worktree_picker(repo_path, cfg=cfg)
+    picker.open_worktree_picker(repo_path, cfg=cfg)
     return 0
 
 
