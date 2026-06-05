@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
-from . import git, text
+from . import git, score, text, tmux
 from .picker import IconSet
 
 # Catppuccin Mocha colours used to highlight session rows in
@@ -101,6 +101,111 @@ def apply_ctrl_x(
         result.append(saved)
 
     return result
+
+
+def _format_session_display(
+    sess_path: Path,
+    name: str,
+    *,
+    home: str,
+    strip_prefixes: list[str],
+) -> str:
+    """Pick the display name for a tmux session row.
+
+    Mirrors the bash ``derived=$(format_session_name "$sess_path");
+    [[ "${derived//./_}" != "$name" ]] && derived="$name"`` dance:
+    fall back to the stored session name when the derived form does not
+    round-trip through tmux's dot→underscore substitution, since that
+    means the user renamed the session by hand.
+    """
+    derived = text.format_session_name(str(sess_path), home=home, strip_prefixes=strip_prefixes)
+    return derived if derived.replace(".", "_") == name else name
+
+
+def build_entries(
+    *,
+    home: str,
+    strip_prefixes: list[str],
+    projects_roots: list[Path],
+    max_depth: int,
+    manual_spec: str,
+    icons: IconSet,
+    score_entries: list[tuple[str, float, float]],
+    now: float,
+    half_life_secs: float,
+    path_boost: float,
+) -> Iterator[str]:
+    """Yield the unified 4-column TSV the session picker consumes.
+
+    Output columns are ``type<TAB>key<TAB>search<TAB>display``: ``s`` for
+    running sessions, ``p`` for project rows, ``n`` for the new-session
+    sentinel. The current session is pinned first (yellow + ``(current)``),
+    the previous session second (green + ``(previous)``), remaining
+    sessions follow in ``session_last_attached`` descending order, then
+    project rows sorted by recency score, then the sentinel.
+
+    All tmux state (current/previous session, pane path, session list)
+    is queried via :mod:`tmux_sessions.tmux` — these are external state
+    queries with no caller-supplied parameters, so they belong in the
+    pure layer per the migration plan.
+    """
+    sessions = tmux.list_sessions()
+    current = tmux.current_session_name()
+    previous = tmux.previous_session_name()
+    pane_path = tmux.pane_current_path()
+
+    by_name: dict[str, tmux.Session] = {s.name: s for s in sessions}
+
+    # Pin current session first (yellow, "(current)"), then previous
+    # session second (green, "(previous)"). Both are skipped silently
+    # when their tmux record is missing.
+    if current and current in by_name:
+        s = by_name[current]
+        display = _format_session_display(s.path, s.name, home=home, strip_prefixes=strip_prefixes)
+        yield (f"s\t{s.sid}\t{display}\t{YELLOW}{icons.session}{icons.sep}{display} (current){RESET}")
+
+    if previous and previous != current and previous in by_name:
+        s = by_name[previous]
+        display = _format_session_display(s.path, s.name, home=home, strip_prefixes=strip_prefixes)
+        yield (f"s\t{s.sid}\t{display}\t{GREEN}{icons.session}{icons.sep}{display} (previous){RESET}")
+
+    # Remaining sessions ordered by last_attached desc; never-attached
+    # sessions report 0 and sink to the bottom of this block.
+    remaining = [s for s in sessions if s.name != current and s.name != previous]
+    remaining.sort(key=lambda s: s.last_attached, reverse=True)
+    for s in remaining:
+        display = _format_session_display(s.path, s.name, home=home, strip_prefixes=strip_prefixes)
+        yield f"s\t{s.sid}\t{display}\t{GREEN}{icons.session}{icons.sep}{display}{RESET}"
+
+    # Projects not yet open as sessions, sorted by recency score.
+    open_names = {s.name for s in sessions}
+    project_rows: list[str] = []
+    for name, project_path in list_projects(
+        projects_roots,
+        max_depth=max_depth,
+        home=home,
+        strip_prefixes=strip_prefixes,
+        manual_spec=manual_spec,
+    ):
+        if name.replace(".", "_") in open_names:
+            continue
+        project_rows.append(f"{name}\t{project_path}\t{project_path}")
+
+    scores = score.current_scores(score_entries, now=now, half_life_secs=half_life_secs)
+    ranked = score.sort_rows(
+        project_rows,
+        boost_path=pane_path,
+        scores=scores,
+        path_boost=path_boost,
+    )
+    for row in ranked:
+        cols = row.split("\t")
+        if len(cols) < 2:
+            continue
+        row_name, row_path = cols[0], cols[1]
+        yield f"p\t{row_path}\t{row_name}\t{icons.project}{icons.sep}{row_name}"
+
+    yield f"n\t\tnew session\t{icons.new}{icons.sep}new session"
 
 
 def is_orphaned_worktree(path: Path, *, container: Path) -> bool:

@@ -212,6 +212,12 @@ def build_parser() -> argparse.ArgumentParser:
     is_orphaned_p.add_argument("path", help="candidate worktree directory")
     is_orphaned_p.set_defaults(handler=cmd_sessions_is_orphaned_worktree)
 
+    build_entries_p = sessions_sub.add_parser(
+        "build-entries",
+        help="emit the 4-column TSV the session picker consumes",
+    )
+    build_entries_p.set_defaults(handler=cmd_sessions_build_entries)
+
     action_p = sessions_sub.add_parser(
         "action",
         help="run a session-picker action (ctrl-x/ctrl-r/ctrl-d)",
@@ -507,6 +513,50 @@ def cmd_sessions_list_projects(args: argparse.Namespace) -> int:
 def cmd_sessions_is_orphaned_worktree(args: argparse.Namespace) -> int:
     path = Path(args.path)
     return 0 if sessions.is_orphaned_worktree(path, container=path.parent) else 1
+
+
+def cmd_sessions_build_entries(args: argparse.Namespace) -> int:
+    home = os.environ.get("HOME", "")
+    raw_dirs = os.environ.get("TMUX_SESSIONS_PROJECTS_DIRS") or f"{home}/Projects"
+    max_depth = int(os.environ.get("TMUX_SESSIONS_MAX_DEPTH") or 6)
+    strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
+    manual_spec = os.environ.get("TMUX_SESSIONS_MANUAL_SESSIONS") or ""
+    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
+    half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
+    path_boost = float(os.environ.get("TMUX_SESSIONS_SCORE_PATH_BOOST") or 1.0)
+    score_file = os.environ.get("SCORE_FILE", "")
+
+    icons = picker.IconSet.from_style(style)
+
+    roots: list[Path] = []
+    for entry in raw_dirs.split():
+        expanded = entry.replace("~", home, 1) if entry.startswith("~") else entry
+        roots.append(Path(expanded))
+
+    if score_file:
+        try:
+            score_text = Path(score_file).read_text()
+        except FileNotFoundError:
+            score_text = ""
+    else:
+        score_text = ""
+    score_entries = score.parse_score_table(score_text)
+
+    for line in sessions.build_entries(
+        home=home,
+        strip_prefixes=strip_prefixes,
+        projects_roots=roots,
+        max_depth=max_depth,
+        manual_spec=manual_spec,
+        icons=icons,
+        score_entries=score_entries,
+        now=time.time(),
+        half_life_secs=half_life_days * 24 * 3600,
+        path_boost=path_boost,
+    ):
+        sys.stdout.write(line)
+        sys.stdout.write("\n")
+    return 0
 
 
 def cmd_sessions_action_ctrl_x(args: argparse.Namespace) -> int:

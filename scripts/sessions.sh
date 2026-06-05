@@ -22,9 +22,11 @@ list_projects() {
     _tmux_sessions_py sessions list-projects
 }
 
-# Catppuccin Mocha green/yellow for running session rows.
+# Catppuccin Mocha green/reset used by _action_ctrl_r when re-rendering a
+# session row after rename. build_entries itself defers to Python now;
+# these constants stay only because the rename path still rebuilds the
+# row in bash.
 _GREEN=$'\033[38;2;166;227;161m'
-_YELLOW=$'\033[38;2;249;226;175m'
 _RESET=$'\033[0m'
 
 # Emit the unified 4-field TSV list consumed by manage_sessions.
@@ -42,67 +44,15 @@ _RESET=$'\033[0m'
 #   p <TAB> path        <TAB> display_name <TAB> icon display_name
 #   n <TAB>             <TAB> new session  <TAB> icon new session
 build_entries() {
-  local current_session prev_session pane_path
-  current_session=$(tmux display-message -p '#{session_name}' 2>/dev/null)
-  prev_session=$(tmux display-message -p '#{client_last_session}' 2>/dev/null)
-  pane_path=$(tmux display-message -p '#{pane_current_path}' 2>/dev/null)
-
-  local sessions_blob
-  sessions_blob=$'\n'$(tmux ls -F "#{session_name}" 2>/dev/null | sed 's/\./_/g')$'\n'
-
-  # Pin the current session first (yellow, labelled "(current)").
-  if [[ -n "$current_session" ]]; then
-    local curr_id
-    curr_id=$(get_session_id "$current_session")
-    if [[ -n "$curr_id" ]]; then
-      local curr_path curr_display
-      curr_path=$(tmux display-message -p -t "$curr_id" '#{session_path}' 2>/dev/null)
-      curr_display=$(format_session_name "$curr_path")
-      [[ "${curr_display//./_}" != "$current_session" ]] && curr_display="$current_session"
-      printf "s\t%s\t%s\t%s%s%s%s (current)%s\n" "${curr_id#\$}" "$curr_display" "$_YELLOW" "$_ICON_SESSION" "$_ICON_SEP" "$curr_display" "$_RESET"
-    fi
-  fi
-
-  # Pin the previous session second (green, labelled "(previous)").
-  if [[ -n "$prev_session" && "$prev_session" != "$current_session" ]]; then
-    local prev_id
-    prev_id=$(get_session_id "$prev_session")
-    if [[ -n "$prev_id" ]]; then
-      local prev_path prev_display
-      prev_path=$(tmux display-message -p -t "$prev_id" '#{session_path}' 2>/dev/null)
-      prev_display=$(format_session_name "$prev_path")
-      [[ "${prev_display//./_}" != "$prev_session" ]] && prev_display="$prev_session"
-      printf "s\t%s\t%s\t%s%s%s%s (previous)%s\n" "${prev_id#\$}" "$prev_display" "$_GREEN" "$_ICON_SESSION" "$_ICON_SEP" "$prev_display" "$_RESET"
-    fi
-  fi
-
-  # Remaining sessions, sorted by tmux's session_last_attached (most recent first).
-  # Sessions never attached report 0 and sink to the bottom of this block.
-  tmux ls -F "#{session_last_attached}"$'\t'"#{session_id}"$'\t'"#{session_name}"$'\t'"#{session_path}" 2>/dev/null \
-    | sort -t$'\t' -k1,1nr -s \
-    | while IFS=$'\t' read -r _last_attached raw_id name sess_path; do
-        [[ "$name" == "$prev_session" ]] && continue
-        [[ "$name" == "$current_session" ]] && continue
-        raw_id="${raw_id#\$}"
-        derived=$(format_session_name "$sess_path")
-        [[ "${derived//./_}" != "$name" ]] && derived="$name"
-        printf "s\t%s\t%s\t%s%s%s%s%s\n" "$raw_id" "$derived" "$_GREEN" "$_ICON_SESSION" "$_ICON_SEP" "$derived" "$_RESET"
-      done
-
-  # Projects not yet open as sessions, sorted by recency score.
-  list_projects \
-    | while IFS=$'\t' read -r name path; do
-        local norm="${name//./_}"
-        [[ "$sessions_blob" == *$'\n'"$norm"$'\n'* ]] && continue
-        printf "%s\t%s\t%s\n" "$name" "$path" "$path"
-      done \
-    | sort_by_score "$pane_path" \
-    | while IFS=$'\t' read -r name path _; do
-        printf "p\t%s\t%s\t%s%s%s\n" "$path" "$name" "$_ICON_PROJECT" "$_ICON_SEP" "$name"
-      done
-
-  # New-session sentinel — always last.
-  printf "n\t\tnew session\t%s%snew session\n" "$_ICON_NEW" "$_ICON_SEP"
+  SCORE_FILE="$SCORE_FILE" \
+  TMUX_SESSIONS_ICON_STYLE="$_ICON_STYLE" \
+  TMUX_SESSIONS_PROJECTS_DIRS="${TMUX_SESSIONS_PROJECTS_DIRS:-$HOME/Projects}" \
+  TMUX_SESSIONS_MAX_DEPTH="${TMUX_SESSIONS_MAX_DEPTH:-6}" \
+  TMUX_SESSIONS_STRIP_PREFIXES="${TMUX_SESSIONS_STRIP_PREFIXES:-}" \
+  TMUX_SESSIONS_MANUAL_SESSIONS="${TMUX_SESSIONS_MANUAL_SESSIONS:-}" \
+  TMUX_SESSIONS_SCORE_HALF_LIFE="${TMUX_SESSIONS_SCORE_HALF_LIFE:-14}" \
+  TMUX_SESSIONS_SCORE_PATH_BOOST="${TMUX_SESSIONS_SCORE_PATH_BOOST:-1.0}" \
+    _tmux_sessions_py sessions build-entries
 }
 
 # ── Action functions ──────────────────────────────────────────────────────────

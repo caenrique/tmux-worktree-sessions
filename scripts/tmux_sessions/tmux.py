@@ -10,7 +10,24 @@ only resolves env-driven defaults.
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass(frozen=True)
+class Session:
+    """One row from ``tmux ls``: id, name, working dir, last-attached ts.
+
+    ``sid`` is the bare session id with the leading ``$`` stripped so
+    callers can treat it as a TSV column without re-escaping. ``last_attached``
+    is 0 for sessions that have never been attached, matching how tmux
+    reports them via ``#{session_last_attached}``.
+    """
+
+    sid: str
+    name: str
+    path: Path
+    last_attached: int
 
 
 def session_id(name: str) -> str | None:
@@ -38,6 +55,68 @@ def session_id(name: str) -> str | None:
         if stored_name == normalized:
             return sid
     return None
+
+
+def list_sessions() -> list[Session]:
+    """Return every running tmux session as a :class:`Session` row.
+
+    The ``$`` prefix on ``session_id`` is stripped so callers can use the
+    bare id as a TSV column. Order matches tmux's output (insertion
+    order); callers that need recency sorting do so themselves.
+    """
+    result = subprocess.run(
+        [
+            "tmux",
+            "ls",
+            "-F",
+            "#{session_last_attached}\t#{session_id}\t#{session_name}\t#{session_path}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return []
+    out: list[Session] = []
+    for line in result.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 4:
+            continue
+        last_attached_raw, raw_id, name, sess_path = parts[0], parts[1], parts[2], parts[3]
+        if not raw_id or not name:
+            continue
+        try:
+            last_attached = int(last_attached_raw or "0")
+        except ValueError:
+            last_attached = 0
+        sid = raw_id[1:] if raw_id.startswith("$") else raw_id
+        out.append(Session(sid=sid, name=name, path=Path(sess_path), last_attached=last_attached))
+    return out
+
+
+def current_session_name() -> str:
+    """Return ``#{session_name}`` for the current client, or empty string."""
+    return _display_message("#{session_name}")
+
+
+def previous_session_name() -> str:
+    """Return ``#{client_last_session}`` for the current client, or empty string."""
+    return _display_message("#{client_last_session}")
+
+
+def pane_current_path() -> str:
+    """Return ``#{pane_current_path}`` for the current client, or empty string."""
+    return _display_message("#{pane_current_path}")
+
+
+def _display_message(fmt: str) -> str:
+    result = subprocess.run(
+        ["tmux", "display-message", "-p", fmt],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.rstrip("\n")
 
 
 def switch_or_create(session_path: Path, name: str) -> None:

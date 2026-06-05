@@ -322,7 +322,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
   Python action mutates the same tmpfile.
 - Pytest parity per action.
 
-### Step 21 — `build_entries` `[ ]`
+### Step 21 — `build_entries` `[x]`
 
 - Pure: `sessions.build_entries(...)` — the 3-column TSV builder. Calls
   into Phase 1–3 pure helpers directly (no shellout) so the inner
