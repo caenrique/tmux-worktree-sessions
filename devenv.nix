@@ -2,14 +2,14 @@
 
 {
   # System tools needed to run the test suite end-to-end. tmux/fzf/fd
-  # are runtime deps of the plugin; bats/shellcheck drive the shell-side
-  # checks; git is needed by the pytest fixtures (real repos under tmp).
+  # are runtime deps of the plugin; shellcheck drives the one remaining
+  # shell file (the TPM entry point); git is needed by the pytest
+  # fixtures (real repos under tmp).
   packages = [
     pkgs.git
     pkgs.tmux
     pkgs.fzf
     pkgs.fd
-    pkgs.bats
     pkgs.shellcheck
   ];
 
@@ -30,8 +30,8 @@
   # the whole suite. The uv venv is auto-activated only inside the
   # interactive `devenv shell`, not in task execution contexts, so the
   # Python tasks shell out via `uv run` to pick up pytest/ruff/mypy from
-  # the project venv. System tools (bats, shellcheck) come from
-  # `packages` above and are on PATH unconditionally.
+  # the project venv. System tools (shellcheck) come from `packages`
+  # above and are on PATH unconditionally.
   tasks = {
     "python:test" = {
       exec = "uv run pytest tests/python";
@@ -49,17 +49,8 @@
       exec = "uv run mypy scripts/tmux_sessions";
       before = [ "devenv:enterTest" ];
     };
-    "bats:test" = {
-      exec = "bats --print-output-on-failure tests/";
-      before = [ "devenv:enterTest" ];
-    };
     "shellcheck:lint" = {
-      exec = ''
-        shellcheck --severity=warning -x \
-          scripts/*.sh tmux-sessions.tmux \
-          tests/test_helper.bash tests/helpers/*.bash \
-          tests/fixtures/bin/*
-      '';
+      exec = "shellcheck --severity=warning tmux-sessions.tmux";
       before = [ "devenv:enterTest" ];
     };
   };

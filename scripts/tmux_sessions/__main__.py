@@ -193,10 +193,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="run the interactive fzf branch picker; print 'new:<name>' or 'existing:<branch>'",
     )
     pick_branch_p.add_argument("repo", help="path to the git repo")
-    pick_branch_p.add_argument(
-        "fetch_reload_script",
-        help="path to fetch_reload.sh (delegates background fetch+reload)",
-    )
     pick_branch_p.set_defaults(handler=cmd_picker_pick_branch)
 
     sessions_p = sub.add_parser("sessions", help="session picker helpers")
@@ -485,7 +481,7 @@ def cmd_picker_pick_branch(args: argparse.Namespace) -> int:
     choice = picker.pick_branch(
         Path(args.repo),
         icons=icons,
-        fetch_reload_script=Path(args.fetch_reload_script),
+        fetch_reload_argv=_fetch_reload_argv(),
         listen_port=listen_port,
         now=time.time(),
     )
@@ -959,6 +955,16 @@ def _bump_score_and_switch(name: str, session_path: Path) -> None:
     tmux.switch_or_create(session_path, name)
 
 
+def _fetch_reload_argv() -> list[str]:
+    """Argv prefix for invoking the in-package fetch-reload subcommand.
+
+    Re-uses the running interpreter so the picker drives the same Python
+    used to launch the dispatcher (matters when the user invokes via a
+    venv or alternative ``python3``).
+    """
+    return [sys.executable, "-m", "tmux_sessions", "fetch-reload"]
+
+
 def _resolve_score_file_env() -> str:
     """Match the bash ``SCORE_FILE`` derivation in ``common.sh``.
 
@@ -1134,17 +1140,11 @@ def _handle_ctrl_w(*, row_type: str, key2: str, icons: picker.IconSet) -> bool:
     if not container:
         return False
 
-    plugin_dir = os.environ.get("TMUX_PLUGIN_DIR")
-    if plugin_dir:
-        fetch_reload_script = Path(plugin_dir) / "scripts" / "fetch_reload.sh"
-    else:
-        fetch_reload_script = Path(__file__).resolve().parent.parent / "fetch_reload.sh"
-
     listen_port = 51200 + secrets.randbelow(14336)
     choice = picker.pick_branch(
         Path(repo_path),
         icons=icons,
-        fetch_reload_script=fetch_reload_script,
+        fetch_reload_argv=_fetch_reload_argv(),
         listen_port=listen_port,
         now=time.time(),
     )

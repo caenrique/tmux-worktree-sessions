@@ -1,8 +1,7 @@
 """Tests for :mod:`tmux_sessions.tmux`.
 
-Mirrors the bats coverage in ``tests/common.bats`` for ``get_session_id``
-and ``switch_or_create_session``. The tmux stub at
-``tests/fixtures/bin/tmux`` is reused via the ``tmux_stub`` fixture.
+Covers ``session_id`` and ``switch_or_create``. The tmux stub at
+``tests/python/_stubs/tmux`` is loaded via the ``tmux_stub`` fixture.
 """
 
 from __future__ import annotations

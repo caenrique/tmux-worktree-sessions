@@ -79,7 +79,7 @@ set -g @tmux-sessions-manual-sessions 'Notes:~/Notes dotfiles:~/.config'
 The session picker derives display names from filesystem paths. If you want the tmux status bar to show the same short names (instead of raw paths with dots converted to underscores), add this to your `tmux.conf`:
 
 ```tmux
-set -g status-left '#(~/.config/tmux/plugins/tmux-sessions/scripts/sessions.sh --display-name "#{session_path}" "#{session_name}")'
+set -g status-left '#(PYTHONPATH=~/.config/tmux/plugins/tmux-sessions/scripts python3 -m tmux_sessions sessions display-name "#{session_path}" "#{session_name}")'
 ```
 
 ## Usage

@@ -141,7 +141,7 @@ def _fetch_head_mtime(repo: Path) -> float | None:
 
 
 def _build_ctrl_f_bind(
-    fetch_reload_script: Path,
+    fetch_reload_argv: list[str],
     repo: Path,
     tmpfile: Path,
     listen_port: int,
@@ -149,7 +149,7 @@ def _build_ctrl_f_bind(
     args = " ".join(
         shlex.quote(s)
         for s in (
-            str(fetch_reload_script),
+            *fetch_reload_argv,
             str(repo),
             str(tmpfile),
             str(listen_port),
@@ -177,7 +177,7 @@ def pick_branch(
     repo: Path,
     *,
     icons: IconSet,
-    fetch_reload_script: Path,
+    fetch_reload_argv: list[str],
     listen_port: int,
     now: float,
     fetch_window_secs: int = 900,
@@ -185,11 +185,11 @@ def pick_branch(
     """Drive the fzf branch picker; return the user's selection.
 
     The picker writes its entries to a temp file so the background
-    fetch helper (``fetch_reload_script``) can rewrite them in place
-    and post a ``reload`` to fzf's listen port. We seed the file once,
-    spawn fetch_reload as a detached background process when
+    fetch helper invoked via ``fetch_reload_argv`` can rewrite them in
+    place and post a ``reload`` to fzf's listen port. We seed the file
+    once, spawn the fetch helper as a detached background process when
     ``FETCH_HEAD`` is older than ``fetch_window_secs`` seconds, and
-    delegate the on-demand ``ctrl-f`` refresh to the same script via an
+    delegate the on-demand ``ctrl-f`` refresh to the same argv via an
     fzf ``execute-silent`` binding.
     """
     fetch_proc: subprocess.Popen[bytes] | None = None
@@ -207,7 +207,7 @@ def pick_branch(
         if git.fetch_is_stale(mtime, now=now, window_secs=fetch_window_secs):
             fetch_proc = subprocess.Popen(
                 [
-                    str(fetch_reload_script),
+                    *fetch_reload_argv,
                     str(repo),
                     str(tmpfile),
                     str(listen_port),
@@ -217,7 +217,7 @@ def pick_branch(
             )
             initial_header = f"{_BRANCH_HEADER} [syncing...]"
 
-        ctrl_f_bind = _build_ctrl_f_bind(fetch_reload_script, repo, tmpfile, listen_port)
+        ctrl_f_bind = _build_ctrl_f_bind(fetch_reload_argv, repo, tmpfile, listen_port)
 
         while True:
             with tmpfile.open("rb") as input_f:

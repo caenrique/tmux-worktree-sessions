@@ -120,7 +120,7 @@ def _make_fresh_fetch_head(repo: Path) -> None:
 def _pick_branch_args(repo: Path) -> dict[str, object]:
     return {
         "icons": IconSet.from_style("ascii"),
-        "fetch_reload_script": Path("/bin/true"),
+        "fetch_reload_argv": ["/bin/true"],
         "listen_port": 12345,
         "now": 0.0,
         "fetch_window_secs": 900,

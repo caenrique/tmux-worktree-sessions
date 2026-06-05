@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_TMUX_STUB_DIR = _REPO_ROOT / "tests" / "fixtures" / "bin"
+_TMUX_STUB_DIR = Path(__file__).parent / "_stubs"
 
 
 def _git(repo: Path, *args: str) -> None:

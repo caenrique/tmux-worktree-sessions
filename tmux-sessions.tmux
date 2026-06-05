@@ -33,4 +33,5 @@ tmux bind-key -n "$_key" run-shell -b "\
   TMUX_SESSIONS_SCORE_HALF_LIFE='$_half_life' \
   TMUX_SESSIONS_SCORE_PATH_BOOST='$_path_boost' \
   TMUX_SESSIONS_ICON_STYLE='$_icon_style' \
-  '$PLUGIN_DIR/scripts/sessions.sh'"
+  PYTHONPATH='$PLUGIN_DIR/scripts' \
+  python3 -m tmux_sessions sessions manage"
