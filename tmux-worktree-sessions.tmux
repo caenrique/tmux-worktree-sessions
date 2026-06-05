@@ -6,6 +6,7 @@ PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _get() { tmux show-option -gqv "$1"; }
 
 _key=$(_get @tws-key);                    _key=${_key:-C-S-s}
+_worktree_key=$(_get @tws-worktree-key); _worktree_key=${_worktree_key:-C-S-w}
 _projects_dirs=$(_get @tws-projects-dir); _projects_dirs=${_projects_dirs:-$HOME/Projects}
 _scores_file=$(_get @tws-scores-file);    _scores_file=${_scores_file:-$HOME/.local/share/tws/scores.tsv}
 _strip_prefixes=$(_get @tws-strip-prefixes)
@@ -15,6 +16,8 @@ _default_branch=$(_get @tws-default-branch); _default_branch=${_default_branch:-
 _half_life=$(_get @tws-score-half-life);  _half_life=${_half_life:-14}
 _path_boost=$(_get @tws-score-path-boost); _path_boost=${_path_boost:-1.0}
 _icon_style=$(_get @tws-icon-style);       _icon_style=${_icon_style:-nerd}
+_worktrees_dir=$(_get @tws-worktrees-dir); _worktrees_dir=${_worktrees_dir:-.worktrees}
+_default_layout=$(_get @tws-default-worktree-layout); _default_layout=${_default_layout:-subfolder}
 
 # Expand literal $HOME that tmux does not expand in option values.
 _projects_dirs="${_projects_dirs//\$HOME/$HOME}"
@@ -22,7 +25,10 @@ _scores_file="${_scores_file//\$HOME/$HOME}"
 _strip_prefixes="${_strip_prefixes//\$HOME/$HOME}"
 _manual_sessions="${_manual_sessions//\$HOME/$HOME}"
 
-tmux bind-key -n "$_key" run-shell -b "\
+# Env block shared by both bind-key invocations below. Single-quoted
+# values survive the outer double-quotes so /bin/sh sees the literal
+# strings unchanged.
+_env="\
   TWS_PROJECTS_DIRS='$_projects_dirs' \
   TWS_SCORES_FILE='$_scores_file' \
   TWS_STRIP_PREFIXES='$_strip_prefixes' \
@@ -32,8 +38,12 @@ tmux bind-key -n "$_key" run-shell -b "\
   TWS_SCORE_HALF_LIFE='$_half_life' \
   TWS_SCORE_PATH_BOOST='$_path_boost' \
   TWS_ICON_STYLE='$_icon_style' \
-  PYTHONPATH='$PLUGIN_DIR/scripts' \
-  python3 -m tmux_worktree_sessions sessions manage"
+  TWS_WORKTREES_DIR='$_worktrees_dir' \
+  TWS_DEFAULT_WORKTREE_LAYOUT='$_default_layout' \
+  PYTHONPATH='$PLUGIN_DIR/scripts'"
+
+tmux bind-key -n "$_key" run-shell -b "$_env python3 -m tmux_worktree_sessions sessions manage"
+tmux bind-key -n "$_worktree_key" run-shell -b "$_env python3 -m tmux_worktree_sessions worktree manage"
 
 # Status-bar widget: replace `#{session_display_name}` in status-left
 # and status-right with a `#(...)` shell-command that calls

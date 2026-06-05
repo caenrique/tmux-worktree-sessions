@@ -16,6 +16,7 @@ from tmux_worktree_sessions.git import (
     add_worktree,
     branch_to_dir,
     default_branch,
+    detect_layout,
     fetch_is_stale,
     is_linked_worktree,
     list_branches,
@@ -25,6 +26,7 @@ from tmux_worktree_sessions.git import (
     rename_worktree,
     resolve_remote,
     toplevel,
+    worktree_container,
 )
 
 
@@ -489,3 +491,132 @@ def test_main_worktree_outside_a_repo_returns_none(tmp_path: Path) -> None:
     plain = tmp_path / "not-a-repo"
     plain.mkdir()
     assert main_worktree(plain) is None
+
+
+def test_detect_layout_no_linked_worktrees_is_ambiguous(make_repo: Callable[..., Path]) -> None:
+    repo = make_repo("r")
+    assert detect_layout(repo, worktrees_dir=".worktrees") == "ambiguous"
+
+
+def test_detect_layout_sibling_when_linked_is_sibling_of_main(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    # Layout: tmp/r-container/{main, feature}; main_worktree is under r-container
+    container = tmp_path / "r-container"
+    container.mkdir()
+    repo = make_repo("r-container/main")
+    feature = container / "feature"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(feature)],
+        check=True,
+        capture_output=True,
+    )
+    assert detect_layout(repo, worktrees_dir=".worktrees") == "sibling"
+
+
+def test_detect_layout_subfolder_when_linked_is_under_worktrees_dir(
+    make_repo: Callable[..., Path],
+) -> None:
+    repo = make_repo("r")
+    sub = repo / ".worktrees"
+    sub.mkdir()
+    feature = sub / "feature"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(feature)],
+        check=True,
+        capture_output=True,
+    )
+    assert detect_layout(repo, worktrees_dir=".worktrees") == "subfolder"
+
+
+def test_detect_layout_honours_custom_worktrees_dir(make_repo: Callable[..., Path]) -> None:
+    repo = make_repo("r")
+    sub = repo / "trees"
+    sub.mkdir()
+    feature = sub / "feature"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(feature)],
+        check=True,
+        capture_output=True,
+    )
+    assert detect_layout(repo, worktrees_dir="trees") == "subfolder"
+    # The same repo with a different worktrees_dir is no longer recognized as subfolder.
+    assert detect_layout(repo, worktrees_dir=".worktrees") == "ambiguous"
+
+
+def test_detect_layout_mixed_paths_is_ambiguous(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r")
+    sub = repo / ".worktrees"
+    sub.mkdir()
+    inside = sub / "inside"
+    outside = tmp_path / "outside"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "inside", str(inside)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "outside", str(outside)],
+        check=True,
+        capture_output=True,
+    )
+    assert detect_layout(repo, worktrees_dir=".worktrees") == "ambiguous"
+
+
+def test_worktree_container_sibling_returns_main_parent(tmp_path: Path) -> None:
+    main = tmp_path / "repo" / "main"
+    assert worktree_container(main, layout="sibling", worktrees_dir=".worktrees") == tmp_path / "repo"
+
+
+def test_worktree_container_subfolder_returns_main_join_worktrees_dir(tmp_path: Path) -> None:
+    main = tmp_path / "repo"
+    assert worktree_container(main, layout="subfolder", worktrees_dir=".worktrees") == tmp_path / "repo" / ".worktrees"
+
+
+def test_worktree_container_subfolder_honours_custom_dir(tmp_path: Path) -> None:
+    main = tmp_path / "repo"
+    assert worktree_container(main, layout="subfolder", worktrees_dir="trees") == tmp_path / "repo" / "trees"
+
+
+def test_add_worktree_places_into_subfolder_container(
+    make_repo: Callable[..., Path],
+) -> None:
+    repo = make_repo("r", with_remote=True)
+    container = repo / ".worktrees"
+    container.mkdir()
+
+    path = add_worktree(
+        repo,
+        container,
+        branch=None,
+        new_name="shiny",
+        default_branch_fallback="main",
+    )
+
+    assert path == container / "shiny"
+    assert path.is_dir()
+    head = subprocess.run(
+        ["git", "-C", str(path), "branch", "--show-current"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head == "shiny"
+
+
+def test_rename_worktree_in_subfolder_layout(
+    make_repo: Callable[..., Path],
+) -> None:
+    repo = make_repo("r", branches=("main", "feature"))
+    container = repo / ".worktrees"
+    container.mkdir()
+    feature_path = container / "feature"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", str(feature_path), "feature"],
+        check=True,
+        capture_output=True,
+    )
+
+    new_path = rename_worktree(repo, container, feature_path, new_name="renamed")
+
+    assert new_path == container / "renamed"
+    assert new_path.is_dir()
+    assert not feature_path.exists()

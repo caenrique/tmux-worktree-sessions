@@ -30,6 +30,21 @@ FZF_INLINE_FLAGS: tuple[str, ...] = (
     "--color",
     "header:#6c7086",
 )
+
+# Truecolor SGR matching the fzf header colour (#6c7086) so the
+# worktree-path suffix in the branch picker reads as a secondary detail
+# next to the bright branch name. ``--ansi`` must be on for the picker
+# to interpret these.
+GRAY = "\033[38;2;108;112;134m"
+# Catppuccin "green" — same hue the session picker uses for active
+# sessions. Reusing it for branches whose worktree is open as a session
+# keeps the visual cue consistent across both pickers.
+GREEN = "\033[38;2;166;227;161m"
+# Bold for branches with a worktree but no session — makes the row
+# brighter than the default-rendered plain-branch rows without picking
+# a hue that competes with the session green.
+BOLD = "\033[1m"
+RESET = "\033[0m"
 FZF_POPUP_FLAGS: tuple[str, ...] = (
     "--tmux",
     "bottom,100%,100%",
@@ -74,13 +89,15 @@ class IconSet:
                 remote="☁️",
                 new="＋",
             )
-        # default: nerd
+        # default: nerd. Written as \\uXXXX escapes — the literal glyphs
+        # were silently flattened to plain spaces during the bash → Python
+        # migration (scripts/common.sh in commit 2e40556 had them inline).
         return cls(
-            session=" ",
-            project=" ",
-            branch=" ",
-            remote=" ",
-            new=" ",
+            session="\ue5ff",
+            project="\uf114",
+            branch="\uf418",
+            remote="\uf0ed",
+            new="\uf44d",
         )
 
 
@@ -97,22 +114,79 @@ class BranchChoice:
     name: str = ""
 
 
-def gen_branch_picker_entries(repo: Path, *, icons: IconSet) -> Iterator[str]:
+def gen_branch_picker_entries(
+    repo: Path,
+    *,
+    icons: IconSet,
+    home: str = "",
+    strip_prefixes: list[str] | None = None,
+    session_paths: frozenset[Path] = frozenset(),
+) -> Iterator[str]:
     """Yield TSV lines for the branch picker.
 
-    First line is the ``[new]`` sentinel, then one line per branch
-    returned by :func:`tmux_worktree_sessions.git.list_branches`. Branches whose
-    name starts with ``<remote>/`` get the remote icon; the rest get
-    the branch icon. When the repo has no remote, every branch falls
-    through to the local icon.
+    First line is the ``[new]`` sentinel. Branches are then grouped to
+    surface what the user is most likely to act on:
+
+    1. Branches whose worktree is currently open as a tmux session —
+       icon+name rendered in catppuccin green (matches the active-
+       session colour in the session picker).
+    2. Branches with an associated worktree but no open session —
+       icon+name rendered bold so the row reads brighter than plain
+       branches without claiming a distinct hue.
+    3. Other local branches (no worktree) — default rendering.
+    4. Remote-only branches (``<remote>/...``) — default rendering.
+
+    Branches with a worktree get the worktree path appended in dark
+    gray, formatted via :func:`text.format_session_name`. Within each
+    group, ``git.list_branches`` order is preserved (alphabetical for
+    locals, sorted for remotes). The picker must be invoked with
+    ``--ansi`` for the SGR codes to render.
     """
+    prefixes = strip_prefixes or []
     remote = git.resolve_remote(repo)
     yield f"[new]\t{icons.new}{icons.sep}new branch"
+
+    branch_paths: dict[str, Path] = {wt.branch: wt.path for wt in git.list_worktrees(repo)}
     remote_prefix = f"{remote}/" if remote else None
+
+    sessions_bucket: list[str] = []
+    worktrees_bucket: list[str] = []
+    locals_bucket: list[str] = []
+    remotes_bucket: list[str] = []
+
     for branch in git.list_branches(repo):
         is_remote = remote_prefix is not None and branch.startswith(remote_prefix)
         icon = icons.remote if is_remote else icons.branch
-        yield f"{branch}\t{icon}{icons.sep}{branch}"
+        wt_path = branch_paths.get(branch)
+
+        has_session = wt_path is not None and wt_path in session_paths
+        has_worktree = wt_path is not None and not has_session
+        if has_session:
+            label_open, label_close = GREEN, RESET
+        elif has_worktree:
+            label_open, label_close = BOLD, RESET
+        else:
+            label_open, label_close = "", ""
+
+        suffix = ""
+        if wt_path is not None:
+            display_path = text.format_session_name(str(wt_path), home=home, strip_prefixes=prefixes)
+            suffix = f" {GRAY}{display_path}{RESET}"
+        line = f"{branch}\t{label_open}{icon}{icons.sep}{branch}{label_close}{suffix}"
+
+        if has_session:
+            sessions_bucket.append(line)
+        elif has_worktree:
+            worktrees_bucket.append(line)
+        elif is_remote:
+            remotes_bucket.append(line)
+        else:
+            locals_bucket.append(line)
+
+    yield from sessions_bucket
+    yield from worktrees_bucket
+    yield from locals_bucket
+    yield from remotes_bucket
 
 
 def _fetch_head_mtime(repo: Path) -> float | None:
@@ -180,6 +254,9 @@ def pick_branch(
     listen_port: int,
     now: float,
     fetch_window_secs: int = 900,
+    home: str = "",
+    strip_prefixes: list[str] | None = None,
+    session_paths: frozenset[Path] = frozenset(),
 ) -> BranchChoice:
     """Drive the fzf branch picker; return the user's selection.
 
@@ -197,7 +274,13 @@ def pick_branch(
     # IPC channel between the picker and the fetcher.
     with tempfile.NamedTemporaryFile("w", delete=False) as initial:
         tmpfile = Path(initial.name)
-        for line in gen_branch_picker_entries(repo, icons=icons):
+        for line in gen_branch_picker_entries(
+            repo,
+            icons=icons,
+            home=home,
+            strip_prefixes=strip_prefixes,
+            session_paths=session_paths,
+        ):
             initial.write(line + "\n")
 
     try:
@@ -224,6 +307,7 @@ def pick_branch(
                     [
                         "fzf",
                         *FZF_POPUP_FLAGS,
+                        "--ansi",
                         "--listen",
                         str(listen_port),
                         "--with-nth",

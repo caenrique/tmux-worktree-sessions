@@ -53,6 +53,8 @@ class Config:
     score_file: Path
     icons: picker.IconSet
     default_branch_fallback: str
+    worktrees_dir: str
+    default_layout: git.ConcreteWorktreeLayout
 
     @classmethod
     def from_env(cls) -> Config:
@@ -69,6 +71,9 @@ class Config:
 
         half_life_days = float(os.environ.get("TWS_SCORE_HALF_LIFE") or 14)
 
+        raw_layout = os.environ.get("TWS_DEFAULT_WORKTREE_LAYOUT") or "subfolder"
+        default_layout: git.ConcreteWorktreeLayout = "sibling" if raw_layout == "sibling" else "subfolder"
+
         return cls(
             home=home,
             projects_roots=roots,
@@ -80,6 +85,8 @@ class Config:
             score_file=Path(score_file_str),
             icons=picker.IconSet.from_style(os.environ.get("TWS_ICON_STYLE") or "nerd"),
             default_branch_fallback=os.environ.get("TWS_DEFAULT_BRANCH") or "main",
+            worktrees_dir=os.environ.get("TWS_WORKTREES_DIR") or ".worktrees",
+            default_layout=default_layout,
         )
 
 
@@ -140,6 +147,14 @@ def build_parser() -> argparse.ArgumentParser:
     display_name_p.add_argument("name", help="session name as stored by tmux (dots → underscores)")
     display_name_p.set_defaults(handler=cmd_sessions_display_name)
 
+    worktree_p = sub.add_parser("worktree", help="worktree picker helpers")
+    worktree_sub = worktree_p.add_subparsers(dest="worktree_command", metavar="<subcommand>")
+    worktree_manage_p = worktree_sub.add_parser(
+        "manage",
+        help="open the branch picker for the current pane's repo (top-level entry point)",
+    )
+    worktree_manage_p.set_defaults(handler=cmd_worktree_manage)
+
     fetch_reload_p = sub.add_parser(
         "fetch-reload",
         help="background-fetch git, regenerate branch entries, post reload to fzf",
@@ -151,6 +166,22 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_reload_p.set_defaults(handler=cmd_fetch_reload)
 
     return parser
+
+
+def _resolve_worktree_container(repo: Path, main_wt: Path, *, cfg: Config) -> Path:
+    """Pick the right container for new/renamed worktrees of ``repo``.
+
+    Detects the existing layout from the repo's worktrees and falls back
+    to ``cfg.default_layout`` when the repo has no linked worktrees yet
+    (or its existing ones don't fit a single shape). The returned
+    directory is created with ``parents=True`` so subfolder layouts work
+    on the very first worktree.
+    """
+    detected = git.detect_layout(repo, worktrees_dir=cfg.worktrees_dir)
+    layout: git.ConcreteWorktreeLayout = cfg.default_layout if detected == "ambiguous" else detected
+    container = git.worktree_container(main_wt, layout=layout, worktrees_dir=cfg.worktrees_dir)
+    container.mkdir(parents=True, exist_ok=True)
+    return container
 
 
 def _read_text_or_empty(path: Path) -> str:
@@ -178,6 +209,7 @@ def _build_entries_iter(cfg: Config) -> Iterator[str]:
         now=time.time(),
         half_life_secs=cfg.half_life_secs,
         path_boost=cfg.path_boost,
+        worktrees_dir=cfg.worktrees_dir,
     )
 
 
@@ -195,7 +227,17 @@ def cmd_fetch_reload(args: argparse.Namespace) -> int:
         return 0
     try:
         os.setsid()
-        fetch_reload.fetch_and_reload(repo, tmpfile, args.port, args.header_base, icons=cfg.icons)
+        session_paths = frozenset(s.path for s in tmux.list_sessions())
+        fetch_reload.fetch_and_reload(
+            repo,
+            tmpfile,
+            args.port,
+            args.header_base,
+            icons=cfg.icons,
+            home=cfg.home,
+            strip_prefixes=cfg.strip_prefixes,
+            session_paths=session_paths,
+        )
         os._exit(0)
     except BaseException:
         os._exit(1)
@@ -279,7 +321,7 @@ def cmd_sessions_action_ctrl_r(args: argparse.Namespace) -> int:
         main_wt = git.main_worktree(target)
         if main_wt is None:
             return 0
-        container = main_wt.parent
+        container = _resolve_worktree_container(main_wt, main_wt, cfg=cfg)
 
         old_branch_result = subprocess.run(
             ["git", "-C", target_path, "branch", "--show-current"],
@@ -614,19 +656,33 @@ def _handle_ctrl_w(*, row_type: str, key2: str, cfg: Config) -> bool:
 
     if repo_path is None:
         return False
+    return _open_worktree_picker(repo_path, cfg=cfg)
 
+
+def _open_worktree_picker(repo_path: Path, *, cfg: Config) -> bool:
+    """Drive the branch picker for ``repo_path``; return True to exit a parent loop.
+
+    Shared between the session-picker ctrl-w handler and the standalone
+    ``worktree manage`` entry point. Returns True when the user picked a
+    branch or pressed Esc, False when they pressed Ctrl-Backspace (which
+    only matters when there IS a parent picker to redraw).
+    """
     main_wt = git.main_worktree(repo_path)
     if main_wt is None:
         return False
-    container = main_wt.parent
+    container = _resolve_worktree_container(repo_path, main_wt, cfg=cfg)
 
     listen_port = 51200 + secrets.randbelow(14336)
+    session_paths = frozenset(s.path for s in tmux.list_sessions())
     choice = picker.pick_branch(
         repo_path,
         icons=cfg.icons,
         fetch_reload_argv=_fetch_reload_argv(),
         listen_port=listen_port,
         now=time.time(),
+        home=cfg.home,
+        strip_prefixes=cfg.strip_prefixes,
+        session_paths=session_paths,
     )
     if choice.kind == "cancel":
         # Esc here is "close all" — return True so the caller exits 0
@@ -659,6 +715,30 @@ def _handle_ctrl_w(*, row_type: str, key2: str, cfg: Config) -> bool:
     name = text.format_session_name(str(wt_path), home=cfg.home, strip_prefixes=cfg.strip_prefixes)
     _bump_score_and_switch(name, wt_path, cfg=cfg)
     return True
+
+
+def cmd_worktree_manage(args: argparse.Namespace) -> int:
+    """Open the branch picker for the current pane's git repo.
+
+    Top-level entry point bound to a separate tmux key (default
+    ``C-S-w``); skips the session picker so creating a new worktree for
+    the repo you're already in is one keystroke instead of three. Shows
+    a tmux flash message when the pane isn't inside a git repo.
+    """
+    cfg = Config.from_env()
+    os.environ["SCORE_FILE"] = str(cfg.score_file)
+    pane_path = tmux.pane_current_path()
+    if not pane_path:
+        return 0
+    repo_path = git.toplevel(Path(pane_path))
+    if repo_path is None:
+        subprocess.run(
+            ["tmux", "display-message", "-d", "2000", "worktree: not a git repo"],
+            capture_output=True,
+        )
+        return 0
+    _open_worktree_picker(repo_path, cfg=cfg)
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

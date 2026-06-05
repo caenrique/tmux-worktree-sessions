@@ -21,6 +21,16 @@ Support listing only the sessions with claude agents
 
 Suggest further integration oportunities.
 
+## Tmux api
+
+create a tmux api to interface with tmux from all other places in the codebase
+
+replace all calls to `subprocess` calling `tmux` with this new api
+
+## Git api
+
+replace all instances of calling git directly, with an api to call git. Refactor the git file as a Git api
+
 # IN PROGRESS
 
 # DONE

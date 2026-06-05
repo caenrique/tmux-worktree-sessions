@@ -81,6 +81,9 @@ def fetch_and_reload(
     header_base: str,
     *,
     icons: IconSet,
+    home: str = "",
+    strip_prefixes: list[str] | None = None,
+    session_paths: frozenset[Path] = frozenset(),
 ) -> None:
     """Run ``git fetch``, regenerate ``tmpfile``, and tell fzf to reload.
 
@@ -105,7 +108,13 @@ def fetch_and_reload(
             capture_output=True,
         )
         with tmpfile.open("w") as f:
-            for line in gen_branch_picker_entries(repo, icons=icons):
+            for line in gen_branch_picker_entries(
+                repo,
+                icons=icons,
+                home=home,
+                strip_prefixes=strip_prefixes,
+                session_paths=session_paths,
+            ):
                 f.write(line + "\n")
     finally:
         stop.set()

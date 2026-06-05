@@ -11,6 +11,10 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
+
+WorktreeLayout = Literal["sibling", "subfolder", "ambiguous"]
+ConcreteWorktreeLayout = Literal["sibling", "subfolder"]
 
 
 def list_git_projects(roots: list[Path], *, max_depth: int) -> list[Path]:
@@ -319,6 +323,52 @@ def add_worktree(
         cmd = ["git", "-C", str(repo), "worktree", "add", str(worktree_path), branch]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, check=True)
     return worktree_path
+
+
+def detect_layout(repo: Path, *, worktrees_dir: str) -> WorktreeLayout:
+    """Classify the worktree layout used by ``repo``.
+
+    Returns ``"sibling"`` when every linked worktree sits next to the
+    main checkout (``<wt>.parent == <main>.parent``), ``"subfolder"``
+    when every linked worktree sits under ``<main>/<worktrees_dir>/``,
+    and ``"ambiguous"`` when there are no linked worktrees yet or the
+    existing ones don't all match a single shape. The caller is expected
+    to resolve ``"ambiguous"`` to a concrete layout via the configured
+    default before placing new worktrees.
+    """
+    worktrees = list_worktrees(repo)
+    if len(worktrees) < 2:
+        return "ambiguous"
+    main = worktrees[0].path
+    linked = [wt.path for wt in worktrees[1:]]
+
+    sibling_parent = main.parent
+    if all(wt.parent == sibling_parent for wt in linked):
+        return "sibling"
+
+    subfolder_parent = main / worktrees_dir
+    if all(wt.parent == subfolder_parent for wt in linked):
+        return "subfolder"
+
+    return "ambiguous"
+
+
+def worktree_container(
+    main: Path,
+    *,
+    layout: ConcreteWorktreeLayout,
+    worktrees_dir: str,
+) -> Path:
+    """Return the directory new worktrees should be placed under.
+
+    For ``"sibling"`` layout this is ``<main>.parent`` (where
+    sibling-layout repos already keep their checkouts). For
+    ``"subfolder"`` it is ``<main>/<worktrees_dir>``. The caller owns
+    ensuring the directory exists before invoking ``git worktree add``.
+    """
+    if layout == "sibling":
+        return main.parent
+    return main / worktrees_dir
 
 
 def rename_worktree(

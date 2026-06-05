@@ -10,6 +10,7 @@ rewrites; CLI-layer cases for the four production action subcommands
 from __future__ import annotations
 
 import io
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from tmux_worktree_sessions.sessions import (
     apply_ctrl_r_session_rename,
     apply_ctrl_x,
     build_entries,
+    expand_subfolder_worktrees,
     is_orphaned_worktree,
     list_projects,
     parse_manual_sessions,
@@ -92,6 +94,56 @@ def test_is_orphaned_worktree_missing_container_returns_false(tmp_path: Path) ->
     assert is_orphaned_worktree(candidate, container=missing) is False
 
 
+def test_expand_subfolder_worktrees_returns_children_with_dotgit(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    sub = repo / ".worktrees"
+    sub.mkdir(parents=True)
+    feature = sub / "feature"
+    feature.mkdir()
+    (feature / ".git").write_text("gitdir: /elsewhere\n")
+    fix = sub / "fix"
+    fix.mkdir()
+    (fix / ".git").mkdir()
+
+    result = expand_subfolder_worktrees(repo, worktrees_dir=".worktrees")
+
+    assert set(result) == {feature, fix}
+
+
+def test_expand_subfolder_worktrees_skips_children_without_dotgit(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    sub = repo / ".worktrees"
+    sub.mkdir(parents=True)
+    real = sub / "real"
+    real.mkdir()
+    (real / ".git").write_text("gitdir: /elsewhere\n")
+    stale = sub / "stale"
+    stale.mkdir()  # no .git
+
+    result = expand_subfolder_worktrees(repo, worktrees_dir=".worktrees")
+
+    assert result == [real]
+
+
+def test_expand_subfolder_worktrees_missing_dir_returns_empty(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    assert expand_subfolder_worktrees(repo, worktrees_dir=".worktrees") == []
+
+
+def test_expand_subfolder_worktrees_honours_custom_dir(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    sub = repo / "trees"
+    sub.mkdir(parents=True)
+    feature = sub / "feature"
+    feature.mkdir()
+    (feature / ".git").write_text("gitdir: /elsewhere\n")
+
+    assert expand_subfolder_worktrees(repo, worktrees_dir="trees") == [feature]
+    # The same repo with a different worktrees_dir finds nothing.
+    assert expand_subfolder_worktrees(repo, worktrees_dir=".worktrees") == []
+
+
 def _list_projects_pairs(
     *,
     projects_dir: Path,
@@ -99,6 +151,7 @@ def _list_projects_pairs(
     manual: str = "",
     strip_prefixes: list[str] | None = None,
     max_depth: int = 4,
+    worktrees_dir: str = ".worktrees",
 ) -> list[tuple[str, str]]:
     return [
         (name, str(path))
@@ -108,6 +161,7 @@ def _list_projects_pairs(
             home=home,
             strip_prefixes=strip_prefixes or [],
             manual_spec=manual,
+            worktrees_dir=worktrees_dir,
         )
     ]
 
@@ -126,6 +180,61 @@ def test_list_projects_emits_one_row_per_git_project(
     paths = [path for _, path in pairs]
     assert str(foo) in paths
     assert str(bar) in paths
+
+
+def test_list_projects_surfaces_subfolder_layout_worktrees(
+    tmp_path: Path,
+    make_repo: Callable[..., Path],
+) -> None:
+    """Subfolder-layout linked worktrees are pruned by ``fd``; ``list_projects``
+    must still surface them by enumerating ``git worktree list`` per repo."""
+    import subprocess as _sp
+
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    repo = make_repo("projects/foo")
+    sub = repo / ".worktrees"
+    sub.mkdir()
+    feature = sub / "feature"
+    _sp.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(feature)],
+        check=True,
+        capture_output=True,
+    )
+
+    pairs = _list_projects_pairs(projects_dir=projects_dir, home=str(tmp_path))
+
+    paths = [path for _, path in pairs]
+    assert str(repo) in paths
+    assert str(feature) in paths
+
+
+def test_list_projects_sibling_layout_emits_each_worktree_once(
+    tmp_path: Path,
+    make_repo: Callable[..., Path],
+) -> None:
+    """Sibling-layout repos: ``fd`` finds every worktree directory directly
+    via its own ``.git`` entry, so each appears as its own row exactly once
+    without any extra enumeration."""
+    import subprocess as _sp
+
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    container = projects_dir / "repo"
+    container.mkdir()
+    repo = make_repo("projects/repo/main")
+    feature = container / "feature"
+    _sp.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(feature)],
+        check=True,
+        capture_output=True,
+    )
+
+    pairs = _list_projects_pairs(projects_dir=projects_dir, home=str(tmp_path), max_depth=6)
+
+    paths = [path for _, path in pairs]
+    assert paths.count(str(repo)) == 1
+    assert paths.count(str(feature)) == 1
 
 
 def test_list_projects_appends_manual_sessions(tmp_path: Path) -> None:
@@ -244,6 +353,7 @@ def _build_entries_lines(
     now: float = 0.0,
     half_life_secs: float = 14 * 24 * 3600,
     path_boost: float = 1.0,
+    worktrees_dir: str = ".worktrees",
 ) -> list[str]:
     return list(
         build_entries(
@@ -257,6 +367,7 @@ def _build_entries_lines(
             now=now,
             half_life_secs=half_life_secs,
             path_boost=path_boost,
+            worktrees_dir=worktrees_dir,
         )
     )
 
@@ -642,6 +753,62 @@ def test_cli_display_name_falls_back_to_raw_on_mismatch(
     rc = main(["sessions", "display-name", f"{tmp_path}/foo", "manual_name"])
     assert rc == 0
     assert stdout.getvalue() == "manual_name"
+
+
+def test_cli_worktree_manage_outside_repo_displays_message(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
+    monkeypatch.setenv("TMUX_STUB_PANE_PATH", str(tmp_path))
+    stub = tmux_stub()
+
+    rc = main(["worktree", "manage"])
+
+    assert rc == 0
+    invocations = stub.invocations()  # type: ignore[attr-defined]
+    assert any(inv[:2] == ["tmux", "display-message"] and "worktree: not a git repo" in inv for inv in invocations), (
+        invocations
+    )
+
+
+def test_cli_worktree_manage_in_repo_invokes_branch_picker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+    fzf_stub: object,
+    make_repo: Callable[..., Path],
+) -> None:
+    """Standalone `worktree manage` resolves the pane's repo and drives
+    `pick_branch`. Stubbed fzf returns Esc → exit 0 without any picks."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("TWS_ICON_STYLE", "none")
+    monkeypatch.setenv("TWS_DEFAULT_WORKTREE_LAYOUT", "subfolder")
+    monkeypatch.setenv("SCORE_FILE", str(tmp_path / "scores.tsv"))
+    repo = make_repo("r", with_remote=True)
+    # Touch FETCH_HEAD so pick_branch's stale-fetch background process
+    # is not spawned during the test.
+    common = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--git-common-dir"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    common_path = Path(common) if Path(common).is_absolute() else repo / common
+    (common_path / "FETCH_HEAD").touch()
+    monkeypatch.setenv("TMUX_STUB_PANE_PATH", str(repo))
+    tmux_stub()
+    fzf_stub.esc()  # type: ignore[attr-defined]
+
+    rc = main(["worktree", "manage"])
+    assert rc == 0
+
+    invocations = fzf_stub.invocations()  # type: ignore[attr-defined]
+    assert invocations, "fzf was not invoked"
+    flat = [token for inv in invocations for token in inv]
+    assert "Branch > " in flat
 
 
 def test_cli_manage_invokes_fzf_with_popup_args(
