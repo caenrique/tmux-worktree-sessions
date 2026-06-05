@@ -21,6 +21,8 @@ from tmux_sessions.sessions import (
     apply_ctrl_x,
     is_orphaned_worktree,
     parse_manual_sessions,
+    remove_project_row,
+    remove_session_row,
 )
 
 
@@ -467,4 +469,177 @@ def test_cli_action_ctrl_r_project_non_worktree_displays_warning(
     invocations = stub.invocations()  # type: ignore[attr-defined]
     assert any(
         inv[:2] == ["tmux", "display-message"] and "ctrl-r: not a linked worktree" in inv for inv in invocations
+    ), invocations
+
+
+def test_remove_session_row_drops_matching_sid() -> None:
+    lines = ["s\t3\talpha\talpha", "s\t4\tbeta\tbeta", "p\t/p/x\tx\tx"]
+    assert remove_session_row(lines, sid="3") == ["s\t4\tbeta\tbeta", "p\t/p/x\tx\tx"]
+
+
+def test_remove_session_row_no_match_returns_lines_unchanged() -> None:
+    lines = ["p\t/p/x\tx\tx"]
+    assert remove_session_row(lines, sid="9") == lines
+
+
+def test_remove_project_row_drops_matching_path() -> None:
+    lines = ["p\t/p/foo\tfoo\tfoo", "p\t/p/bar\tbar\tbar"]
+    assert remove_project_row(lines, path="/p/foo") == ["p\t/p/bar\tbar\tbar"]
+
+
+def _mkworktree(repo: Path, branch: str, path: Path) -> None:
+    """Create a linked worktree, mirroring ``mkworktree`` in git_fixtures.bash."""
+    import subprocess as _sp
+
+    has_branch = (
+        _sp.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", branch],
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+    if has_branch:
+        _sp.run(
+            ["git", "-C", str(repo), "worktree", "add", "-q", str(path), branch],
+            check=True,
+            capture_output=True,
+        )
+    else:
+        _sp.run(
+            ["git", "-C", str(repo), "worktree", "add", "-q", "-b", branch, str(path)],
+            check=True,
+            capture_output=True,
+        )
+
+
+def test_cli_action_ctrl_d_session_with_worktree_kills_and_removes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+    make_repo: Callable[..., Path],
+) -> None:
+    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    repo = make_repo("r", with_remote=True)
+    wt = tmp_path / "wt" / "feature"
+    _mkworktree(repo, "feature", wt)
+    stub = tmux_stub(sessions=f"feature\t$5\t{wt}")
+    tmpfile = tmp_path / "entries"
+    tmpfile.write_text("s\t5\tfeature\tfeature\np\t/other/proj\tother\tother\n")
+
+    rc = main(["sessions", "action", "ctrl-d", "s", "5", str(tmpfile)])
+    assert rc == 0
+
+    out = tmpfile.read_text()
+    assert "s\t5\t" not in out
+    assert "p\t/other/proj" in out
+    invocations = stub.invocations()  # type: ignore[attr-defined]
+    assert any(inv[:4] == ["tmux", "kill-session", "-t", "$5"] for inv in invocations), invocations
+    assert not wt.exists()
+
+
+def test_cli_action_ctrl_d_session_only_path_kills_and_strips(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+) -> None:
+    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    stub = tmux_stub(sessions=f"plain\t$7\t{plain}")
+    tmpfile = tmp_path / "entries"
+    tmpfile.write_text("s\t7\tplain\tplain\np\t/other/proj\tother\tother\n")
+
+    rc = main(["sessions", "action", "ctrl-d", "s", "7", str(tmpfile)])
+    assert rc == 0
+
+    out = tmpfile.read_text()
+    assert "s\t7\t" not in out
+    assert "p\t/other/proj" in out
+    invocations = stub.invocations()  # type: ignore[attr-defined]
+    assert any(inv[:4] == ["tmux", "kill-session", "-t", "$7"] for inv in invocations), invocations
+
+
+def test_cli_action_ctrl_d_project_linked_worktree_removes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    make_repo: Callable[..., Path],
+) -> None:
+    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    repo = make_repo("r", with_remote=True)
+    wt = tmp_path / "wt" / "feature"
+    _mkworktree(repo, "feature", wt)
+    tmpfile = tmp_path / "entries"
+    tmpfile.write_text(f"p\t{wt}\tfeature\tfeature\np\t/other/proj\tother\tother\n")
+
+    rc = main(["sessions", "action", "ctrl-d", "p", str(wt), str(tmpfile)])
+    assert rc == 0
+
+    out = tmpfile.read_text()
+    assert str(wt) not in out
+    assert "/other/proj" in out
+    assert not wt.exists()
+
+
+def test_cli_action_ctrl_d_orphan_dir_yes_deletes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fzf_stub: object,
+    make_repo: Callable[..., Path],
+) -> None:
+    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    make_repo("wt/realrepo")
+    orphan = tmp_path / "wt" / "orphan"
+    orphan.mkdir(parents=True)
+    fzf_stub.respond("Yes")  # type: ignore[attr-defined]
+    tmpfile = tmp_path / "entries"
+    tmpfile.write_text(f"p\t{orphan}\torphan\torphan\np\t/other\tother\tother\n")
+
+    rc = main(["sessions", "action", "ctrl-d", "p", str(orphan), str(tmpfile)])
+    assert rc == 0
+
+    out = tmpfile.read_text()
+    assert str(orphan) not in out
+    assert not orphan.exists()
+
+
+def test_cli_action_ctrl_d_orphan_dir_no_keeps(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fzf_stub: object,
+    make_repo: Callable[..., Path],
+) -> None:
+    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    make_repo("wt/realrepo")
+    orphan = tmp_path / "wt" / "orphan"
+    orphan.mkdir(parents=True)
+    fzf_stub.respond("No")  # type: ignore[attr-defined]
+    tmpfile = tmp_path / "entries"
+    tmpfile.write_text(f"p\t{orphan}\torphan\torphan\n")
+
+    rc = main(["sessions", "action", "ctrl-d", "p", str(orphan), str(tmpfile)])
+    assert rc == 0
+
+    assert orphan.exists()
+    assert str(orphan) in tmpfile.read_text()
+
+
+def test_cli_action_ctrl_d_non_orphan_non_worktree_displays_message(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+) -> None:
+    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    notes = tmp_path / "lonely" / "notes"
+    notes.mkdir(parents=True)
+    stub = tmux_stub()
+    tmpfile = tmp_path / "entries"
+    tmpfile.write_text(f"p\t{notes}\tnotes\tnotes\n")
+
+    rc = main(["sessions", "action", "ctrl-d", "p", str(notes), str(tmpfile)])
+    assert rc == 0
+
+    assert notes.exists()
+    invocations = stub.invocations()  # type: ignore[attr-defined]
+    assert any(
+        inv[:2] == ["tmux", "display-message"] and "ctrl-d: not a linked worktree" in inv for inv in invocations
     ), invocations

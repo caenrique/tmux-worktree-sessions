@@ -131,6 +131,28 @@ def apply_ctrl_r_session_rename(
     return result
 
 
+def remove_session_row(lines: list[str], *, sid: str) -> list[str]:
+    """Drop the ``s<TAB><sid><TAB>...`` rows from a tmpfile snapshot.
+
+    Mirrors the bash ``grep -v $'^s\\t'"$id"$'\\t'`` filter used by
+    ``_action_ctrl_d`` to strip a session entry once it's been killed.
+    """
+    prefix = f"s\t{sid}\t"
+    return [line for line in lines if not line.startswith(prefix)]
+
+
+def remove_project_row(lines: list[str], *, path: str) -> list[str]:
+    """Drop the ``p<TAB><path><TAB>...`` rows from a tmpfile snapshot.
+
+    Mirrors the bash ``grep -v $'^p\\t'"$wt_path"$'\\t'`` filter used by
+    ``_action_ctrl_d`` after a worktree or orphaned project directory is
+    removed. Path comparison is exact (no glob escaping needed since the
+    column is delimited by tabs).
+    """
+    prefix = f"p\t{path}\t"
+    return [line for line in lines if not line.startswith(prefix)]
+
+
 def _format_session_display(
     sess_path: Path,
     name: str,

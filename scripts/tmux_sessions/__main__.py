@@ -242,6 +242,15 @@ def build_parser() -> argparse.ArgumentParser:
     ctrl_r_p.add_argument("tmpfile", help="picker entries tmpfile to mutate in place")
     ctrl_r_p.set_defaults(handler=cmd_sessions_action_ctrl_r)
 
+    ctrl_d_p = action_sub.add_parser(
+        "ctrl-d",
+        help="kill a session and/or remove its worktree; prompt on orphaned dirs",
+    )
+    ctrl_d_p.add_argument("type", help="picker entry type: 's', 'p', or 'n'")
+    ctrl_d_p.add_argument("id", help="session id (without leading $) or project path")
+    ctrl_d_p.add_argument("tmpfile", help="picker entries tmpfile to mutate in place")
+    ctrl_d_p.set_defaults(handler=cmd_sessions_action_ctrl_d)
+
     fetch_reload_p = sub.add_parser(
         "fetch-reload",
         help="background-fetch git, regenerate branch entries, post reload to fzf",
@@ -727,6 +736,107 @@ def cmd_sessions_action_ctrl_r(args: argparse.Namespace) -> int:
         ["tmux", "display-message", "-d", "2000", "ctrl-r: not a linked worktree"],
         capture_output=True,
     )
+    return 0
+
+
+def _git_dir(path: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", path, "rev-parse", "--git-dir"],
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _git_toplevel(path: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", path, "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _confirm_orphan_delete(wt_path: str) -> bool:
+    """Drive the inline No/Yes fzf prompt for orphan-dir deletion.
+
+    Mirrors the bash ``printf 'No\\nYes' | fzf $FZF_INLINE --no-sort
+    --prompt "Delete $(basename "$wt_path")? "`` invocation.
+    """
+    result = subprocess.run(
+        [
+            "fzf",
+            *picker.FZF_INLINE_FLAGS,
+            "--no-sort",
+            "--prompt",
+            f"Delete {Path(wt_path).name}? ",
+            "--header",
+            "directory is not git-linked — delete anyway?",
+        ],
+        input="No\nYes",
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "Yes"
+
+
+def cmd_sessions_action_ctrl_d(args: argparse.Namespace) -> int:
+    tmpfile = Path(args.tmpfile)
+
+    if args.type == "s":
+        tmux_id = f"${args.id}"
+        sess_path_result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", tmux_id, "#{session_path}"],
+            capture_output=True,
+            text=True,
+        )
+        sess_path = sess_path_result.stdout.strip()
+        subprocess.run(["tmux", "kill-session", "-t", tmux_id], capture_output=True)
+
+        lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+        new_lines = sessions.remove_session_row(lines, sid=args.id)
+        tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+
+        git_dir = _git_dir(sess_path)
+        if "worktrees" in git_dir:
+            wt_repo = _git_toplevel(sess_path)
+            if wt_repo:
+                subprocess.run(
+                    ["git", "-C", wt_repo, "worktree", "remove", "--force", sess_path],
+                    capture_output=True,
+                )
+        return 0
+
+    if args.type == "p":
+        wt_path = args.id
+        git_dir = _git_dir(wt_path)
+        if "worktrees" not in git_dir:
+            if sessions.is_orphaned_worktree(Path(wt_path), container=Path(wt_path).parent):
+                if not _confirm_orphan_delete(wt_path):
+                    return 0
+                lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+                new_lines = sessions.remove_project_row(lines, path=wt_path)
+                tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+                subprocess.run(["rm", "-rf", wt_path], capture_output=True)
+            else:
+                subprocess.run(
+                    ["tmux", "display-message", "-d", "2000", "ctrl-d: not a linked worktree"],
+                    capture_output=True,
+                )
+            return 0
+
+        wt_repo = _git_toplevel(wt_path)
+        if not wt_repo:
+            return 0
+        lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+        new_lines = sessions.remove_project_row(lines, path=wt_path)
+        tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+        subprocess.run(
+            ["git", "-C", wt_repo, "worktree", "remove", "--force", wt_path],
+            capture_output=True,
+        )
+        return 0
+
     return 0
 
 

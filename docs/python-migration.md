@@ -307,10 +307,11 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
   `cmd_sessions_is_orphaned_worktree` (passthroughs).
 - Replace bash. Pytest parity.
 
-### Step 20 — `_action_ctrl_x`, `_action_ctrl_r`, `_action_ctrl_d` `[~]`
+### Step 20 — `_action_ctrl_x`, `_action_ctrl_r`, `_action_ctrl_d` `[x]`
 
 - Step 20a `[x]` — `_action_ctrl_x`
 - Step 20b `[x]` — `_action_ctrl_r`
+- Step 20c `[x]` — `_action_ctrl_d`
 
 - Migrate one action per substep (so this is really three commits
   inside Step 20: 20a, 20b, 20c).

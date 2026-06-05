@@ -61,49 +61,7 @@ _is_orphaned_worktree_dir() {
 #         delete a linked worktree with no session (project rows);
 #         prompt to delete if dir looks like an orphaned worktree.
 _action_ctrl_d() {
-  local type="$1" id="$2" tmpfile="$3"
-
-  if [[ "$type" == "s" ]]; then
-    local tmux_id="\$$id"
-    local sess_path
-    sess_path=$(tmux display-message -p -t "$tmux_id" '#{session_path}' 2>/dev/null)
-    tmux kill-session -t "$tmux_id" 2>/dev/null
-    local git_dir
-    git_dir=$(git -C "$sess_path" rev-parse --git-dir 2>/dev/null)
-    grep -v $'^s\t'"$id"$'\t' "$tmpfile" > "${tmpfile}.new" && mv "${tmpfile}.new" "$tmpfile"
-    if [[ "$git_dir" == *"worktrees"* ]]; then
-      local wt_repo
-      wt_repo=$(git -C "$sess_path" rev-parse --show-toplevel 2>/dev/null)
-      [[ -n "$wt_repo" ]] && git -C "$wt_repo" worktree remove --force "$sess_path" >&2 &
-    fi
-
-  elif [[ "$type" == "p" ]]; then
-    local wt_path="$id"
-    local git_dir
-    git_dir=$(git -C "$wt_path" rev-parse --git-dir 2>/dev/null)
-    if [[ "$git_dir" != *"worktrees"* ]]; then
-      if _is_orphaned_worktree_dir "$wt_path"; then
-        local answer
-        answer=$(printf 'No\nYes' | fzf $FZF_INLINE \
-          --no-sort \
-          --prompt "Delete $(basename "$wt_path")? " \
-          --header "directory is not git-linked — delete anyway?")
-        [[ "$answer" != "Yes" ]] && return
-        grep -v $'^p\t'"$(printf '%s' "$wt_path" | sed 's|[/\&]|\\&|g')"$'\t' \
-          "$tmpfile" > "${tmpfile}.new" && mv "${tmpfile}.new" "$tmpfile"
-        rm -rf "$wt_path" &
-      else
-        tmux display-message -d 2000 "ctrl-d: not a linked worktree"
-      fi
-      return
-    fi
-    local wt_repo
-    wt_repo=$(git -C "$wt_path" rev-parse --show-toplevel 2>/dev/null)
-    [[ -z "$wt_repo" ]] && return
-    grep -v $'^p\t'"$(printf '%s' "$wt_path" | sed 's|[/\&]|\\&|g')"$'\t' \
-      "$tmpfile" > "${tmpfile}.new" && mv "${tmpfile}.new" "$tmpfile"
-    git -C "$wt_repo" worktree remove --force "$wt_path" >&2 &
-  fi
+  _tmux_sessions_py sessions action ctrl-d "$1" "$2" "$3"
 }
 
 # ctrl-x: kill session only; convert the entry to a project row in place.
