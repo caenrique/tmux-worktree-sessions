@@ -22,7 +22,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import git, picker, score, text, tmux
+from . import fetch_reload, git, picker, score, text, tmux
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -195,6 +195,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to fetch_reload.sh (delegates background fetch+reload)",
     )
     pick_branch_p.set_defaults(handler=cmd_picker_pick_branch)
+
+    fetch_reload_p = sub.add_parser(
+        "fetch-reload",
+        help="background-fetch git, regenerate branch entries, post reload to fzf",
+    )
+    fetch_reload_p.add_argument("repo", help="path to the git repo")
+    fetch_reload_p.add_argument("tmpfile", help="branch entries file fzf reads via reload(cat ...)")
+    fetch_reload_p.add_argument("port", type=int, help="fzf --listen port to POST to")
+    fetch_reload_p.add_argument("header_base", help="header text without the spinner suffix")
+    fetch_reload_p.add_argument(
+        "--no-fork",
+        action="store_true",
+        help="run synchronously without forking (used by tests)",
+    )
+    fetch_reload_p.set_defaults(handler=cmd_fetch_reload)
 
     return parser
 
@@ -408,6 +423,31 @@ def cmd_picker_pick_branch(args: argparse.Namespace) -> int:
         return 2
     sys.stdout.write(f"{choice.kind}:{choice.name}\n")
     return 0
+
+
+def cmd_fetch_reload(args: argparse.Namespace) -> int:
+    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
+    icons = picker.IconSet.from_style(style)
+    repo = Path(args.repo)
+    tmpfile = Path(args.tmpfile)
+
+    if args.no_fork:
+        fetch_reload.fetch_and_reload(repo, tmpfile, args.port, args.header_base, icons=icons)
+        return 0
+
+    # Fork once so fzf's execute-silent caller returns immediately while
+    # we keep running. Parent exits 0; child detaches with setsid and
+    # uses os._exit so atexit handlers and pytest's own cleanup never
+    # run twice.
+    pid = os.fork()
+    if pid != 0:
+        return 0
+    try:
+        os.setsid()
+        fetch_reload.fetch_and_reload(repo, tmpfile, args.port, args.header_base, icons=icons)
+        os._exit(0)
+    except BaseException:
+        os._exit(1)
 
 
 def cmd_text_format_session_name(args: argparse.Namespace) -> int:

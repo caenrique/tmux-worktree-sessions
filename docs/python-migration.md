@@ -284,7 +284,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
 - Replace bash. Pytest parity using the fzf stub (the bats stub
   strategy ports cleanly).
 
-### Step 18 — `fetch_reload.sh` `[ ]`
+### Step 18 — `fetch_reload.sh` `[x]`
 
 - Pure: `fetch_reload.fetch_and_reload(repo: Path, tmpfile: Path, port:
   int, header_base: str) -> None` in

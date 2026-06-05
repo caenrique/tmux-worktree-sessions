@@ -141,6 +141,33 @@ class FzfStub:
         return [line.split("\t") for line in self.invocation_log.read_text().splitlines() if line]
 
 
+@dataclass
+class CurlStub:
+    """Handle to the bats curl stub primed via env for one test."""
+
+    log: Path
+
+    def invocations(self) -> list[list[str]]:
+        if not self.log.exists():
+            return []
+        return [line.split("\t") for line in self.log.read_text().splitlines() if line]
+
+    def text(self) -> str:
+        if not self.log.exists():
+            return ""
+        return self.log.read_text()
+
+
+@pytest.fixture
+def curl_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CurlStub:
+    """Prepend the bats curl stub to PATH and seed an empty log."""
+    log = tmp_path / "curl.log"
+    log.write_text("")
+    monkeypatch.setenv("PATH", f"{_TMUX_STUB_DIR}:{os.environ['PATH']}")
+    monkeypatch.setenv("CURL_STUB_LOG", str(log))
+    return CurlStub(log=log)
+
+
 @pytest.fixture
 def fzf_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FzfStub:
     """Prepend the bats fzf stub to PATH and seed empty queues."""
