@@ -23,7 +23,6 @@ _strip_prefixes="${_strip_prefixes//\$HOME/$HOME}"
 _manual_sessions="${_manual_sessions//\$HOME/$HOME}"
 
 tmux bind-key -n "$_key" run-shell -b "\
-  TMUX_PLUGIN_DIR='$PLUGIN_DIR' \
   TMUX_SESSIONS_PROJECTS_DIRS='$_projects_dirs' \
   TMUX_SESSIONS_SCORES_FILE='$_scores_file' \
   TMUX_SESSIONS_STRIP_PREFIXES='$_strip_prefixes' \

@@ -1,14 +1,17 @@
 """CLI dispatcher for the tmux_sessions package.
 
-This module owns every form of implicit I/O: argparse subcommand
-registration, environment-variable lookup, ``sys.stdin``/``stdout``,
-config/state file reads and writes, ``time.time()``, and exit codes.
-Each ``cmd_<group>_<verb>`` handler resolves these concerns once and
-calls into the pure layer with explicit parameters.
+Only the four subcommands actually invoked from production are
+registered here:
 
-Future migration steps add their own ``cmd_*`` handlers here. We keep
-all CLI handlers co-located so the I/O surface is easy to scan; we'll
-shard into ``cli/<group>.py`` only if this module ever gets unwieldy.
+* ``sessions manage`` — TPM key-bind entry point.
+* ``sessions display-name`` — status-bar helper (see README).
+* ``sessions action ctrl-x|ctrl-r|ctrl-d`` — fzf binds spawned inside
+  the ``manage`` loop.
+* ``fetch-reload`` — fzf bind spawned inside ``picker.pick_branch``.
+
+Earlier migration steps registered a much larger surface as parity
+shims; once the bash callers were retired those subcommands had no
+consumer outside the test suite, so they were dropped.
 """
 
 from __future__ import annotations
@@ -35,187 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
-    score_p = sub.add_parser("score", help="score storage and sorting")
-    score_sub = score_p.add_subparsers(dest="score_command", metavar="<subcommand>")
-
-    sort_p = score_sub.add_parser("sort", help="sort TSV input by score (highest first)")
-    sort_p.add_argument(
-        "boost_path",
-        nargs="?",
-        default="",
-        help="path used for the path-similarity boost; empty disables",
-    )
-    sort_p.set_defaults(handler=cmd_score_sort)
-
-    update_p = score_sub.add_parser(
-        "update",
-        help="increment the pick score for a session name",
-    )
-    update_p.add_argument("name", help="session name whose score to bump")
-    update_p.set_defaults(handler=cmd_score_update)
-
-    text_p = sub.add_parser("text", help="text utilities")
-    text_sub = text_p.add_subparsers(dest="text_command", metavar="<subcommand>")
-
-    strip_p = text_sub.add_parser("strip-ansi", help="strip ANSI SGR escape sequences")
-    strip_p.add_argument("text", help="input string")
-    strip_p.set_defaults(handler=cmd_text_strip_ansi)
-
-    sanitize_p = text_sub.add_parser(
-        "sanitize-name",
-        help="trim whitespace and replace internal whitespace with dashes",
-    )
-    sanitize_p.add_argument("text", help="input string")
-    sanitize_p.set_defaults(handler=cmd_text_sanitize_name)
-
-    fsn_p = text_sub.add_parser(
-        "format-session-name",
-        help="derive a short session name from a filesystem path",
-    )
-    fsn_p.add_argument("path", help="filesystem path")
-    fsn_p.set_defaults(handler=cmd_text_format_session_name)
-
-    git_p = sub.add_parser("git", help="git helpers")
-    git_sub = git_p.add_subparsers(dest="git_command", metavar="<subcommand>")
-
-    branch_to_dir_p = git_sub.add_parser(
-        "branch-to-dir",
-        help="convert a branch name to a safe directory name",
-    )
-    branch_to_dir_p.add_argument("name", help="branch name")
-    branch_to_dir_p.set_defaults(handler=cmd_git_branch_to_dir)
-
-    resolve_remote_p = git_sub.add_parser(
-        "resolve-remote",
-        help="print 'origin' if configured, else the first listed remote",
-    )
-    resolve_remote_p.add_argument("repo", help="path to the git repo")
-    resolve_remote_p.set_defaults(handler=cmd_git_resolve_remote)
-
-    default_branch_p = git_sub.add_parser(
-        "default-branch",
-        help="print the default remote branch name (e.g. main)",
-    )
-    default_branch_p.add_argument("repo", help="path to the git repo")
-    default_branch_p.set_defaults(handler=cmd_git_default_branch)
-
-    list_branches_p = git_sub.add_parser(
-        "list-branches",
-        help="print local branches then remote-only branches with <remote>/ prefix",
-    )
-    list_branches_p.add_argument("repo", help="path to the git repo")
-    list_branches_p.set_defaults(handler=cmd_git_list_branches)
-
-    list_worktrees_p = git_sub.add_parser(
-        "list-worktrees",
-        help="print one path<TAB>branch line per worktree",
-    )
-    list_worktrees_p.add_argument("repo", help="path to the git repo")
-    list_worktrees_p.set_defaults(handler=cmd_git_list_worktrees)
-
-    add_worktree_p = git_sub.add_parser(
-        "add-worktree",
-        help="create or reuse a worktree; print its path",
-    )
-    add_worktree_p.add_argument("repo", help="path to the git repo")
-    add_worktree_p.add_argument("container", help="directory under which to create the worktree")
-    add_worktree_p.add_argument(
-        "branch",
-        help="existing branch (may be <remote>/<name>); empty string to create a new branch",
-    )
-    add_worktree_p.add_argument(
-        "new_name",
-        help="new branch name to create; empty string when reusing an existing branch",
-    )
-    add_worktree_p.set_defaults(handler=cmd_git_add_worktree)
-
-    list_projects_p = git_sub.add_parser(
-        "list-projects",
-        help="emit session_name<TAB>path for each git project under the configured roots",
-    )
-    list_projects_p.set_defaults(handler=cmd_git_list_projects)
-
-    fetch_is_stale_p = git_sub.add_parser(
-        "fetch-is-stale",
-        help="exit 0 if FETCH_HEAD is missing or older than --window seconds",
-    )
-    fetch_is_stale_p.add_argument("repo", help="path to the git repo")
-    fetch_is_stale_p.add_argument(
-        "--window", type=int, default=900, help="staleness threshold in seconds (default 900)"
-    )
-    fetch_is_stale_p.set_defaults(handler=cmd_git_fetch_is_stale)
-
-    rename_worktree_p = git_sub.add_parser(
-        "rename-worktree",
-        help="rename a worktree's branch and move its directory; print the new path",
-    )
-    rename_worktree_p.add_argument("repo", help="path to the parent git repo")
-    rename_worktree_p.add_argument("container", help="directory holding sibling worktrees")
-    rename_worktree_p.add_argument("wt_path", help="current worktree path")
-    rename_worktree_p.add_argument("new_name", help="post-prompt sanitised new branch name")
-    rename_worktree_p.set_defaults(handler=cmd_git_rename_worktree)
-
-    tmux_p = sub.add_parser("tmux", help="tmux helpers")
-    tmux_sub = tmux_p.add_subparsers(dest="tmux_command", metavar="<subcommand>")
-
-    session_id_p = tmux_sub.add_parser(
-        "session-id",
-        help="print the tmux session id ($N) for an exact session name",
-    )
-    session_id_p.add_argument("name", help="session name (dots are normalised to underscores)")
-    session_id_p.set_defaults(handler=cmd_tmux_session_id)
-
-    switch_or_create_p = tmux_sub.add_parser(
-        "switch-or-create",
-        help="switch to a session or create it first",
-    )
-    switch_or_create_p.add_argument("path", help="working directory for the session")
-    switch_or_create_p.add_argument(
-        "name",
-        nargs="?",
-        default="",
-        help="session name; defaults to format-session-name(path)",
-    )
-    switch_or_create_p.set_defaults(handler=cmd_tmux_switch_or_create)
-
-    picker_p = sub.add_parser("picker", help="branch/session picker helpers")
-    picker_sub = picker_p.add_subparsers(dest="picker_command", metavar="<subcommand>")
-
-    branch_entries_p = picker_sub.add_parser(
-        "branch-entries",
-        help="emit TSV rows for the branch picker ([new] sentinel + branches)",
-    )
-    branch_entries_p.add_argument("repo", help="path to the git repo")
-    branch_entries_p.set_defaults(handler=cmd_picker_branch_entries)
-
-    pick_branch_p = picker_sub.add_parser(
-        "pick-branch",
-        help="run the interactive fzf branch picker; print 'new:<name>' or 'existing:<branch>'",
-    )
-    pick_branch_p.add_argument("repo", help="path to the git repo")
-    pick_branch_p.set_defaults(handler=cmd_picker_pick_branch)
-
     sessions_p = sub.add_parser("sessions", help="session picker helpers")
     sessions_sub = sessions_p.add_subparsers(dest="sessions_command", metavar="<subcommand>")
-
-    sessions_list_p = sessions_sub.add_parser(
-        "list-projects",
-        help="emit session_name<TAB>path for git projects then manual sessions",
-    )
-    sessions_list_p.set_defaults(handler=cmd_sessions_list_projects)
-
-    is_orphaned_p = sessions_sub.add_parser(
-        "is-orphaned-worktree",
-        help="exit 0 if path's parent contains a sibling git repo",
-    )
-    is_orphaned_p.add_argument("path", help="candidate worktree directory")
-    is_orphaned_p.set_defaults(handler=cmd_sessions_is_orphaned_worktree)
-
-    build_entries_p = sessions_sub.add_parser(
-        "build-entries",
-        help="emit the 4-column TSV the session picker consumes",
-    )
-    build_entries_p.set_defaults(handler=cmd_sessions_build_entries)
 
     action_p = sessions_sub.add_parser(
         "action",
@@ -272,225 +96,9 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_reload_p.add_argument("tmpfile", help="branch entries file fzf reads via reload(cat ...)")
     fetch_reload_p.add_argument("port", type=int, help="fzf --listen port to POST to")
     fetch_reload_p.add_argument("header_base", help="header text without the spinner suffix")
-    fetch_reload_p.add_argument(
-        "--no-fork",
-        action="store_true",
-        help="run synchronously without forking (used by tests)",
-    )
     fetch_reload_p.set_defaults(handler=cmd_fetch_reload)
 
     return parser
-
-
-def cmd_score_sort(args: argparse.Namespace) -> int:
-    score_file = os.environ.get("SCORE_FILE", "")
-    half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
-    path_boost = float(os.environ.get("TMUX_SESSIONS_SCORE_PATH_BOOST") or 1.0)
-
-    if score_file:
-        try:
-            text = Path(score_file).read_text()
-        except FileNotFoundError:
-            text = ""
-    else:
-        text = ""
-
-    entries = score.parse_score_table(text)
-    scores = score.current_scores(
-        entries,
-        now=time.time(),
-        half_life_secs=half_life_days * 24 * 3600,
-    )
-    ranked = score.sort_rows(
-        sys.stdin.readlines(),
-        boost_path=args.boost_path,
-        scores=scores,
-        path_boost=path_boost,
-    )
-    for line in ranked:
-        sys.stdout.write(line)
-        sys.stdout.write("\n")
-    return 0
-
-
-def cmd_score_update(args: argparse.Namespace) -> int:
-    score_file = Path(os.environ.get("SCORE_FILE", ""))
-    half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
-    half_life_secs = half_life_days * 24 * 3600
-    now = float(int(time.time()))
-
-    score_file.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        text_in = score_file.read_text()
-    except FileNotFoundError:
-        text_in = ""
-
-    entries = score.parse_score_table(text_in)
-    new_entries = score.merge_score(entries, name=args.name, now=now, half_life_secs=half_life_secs)
-
-    tmp = score_file.with_name(score_file.name + ".tmp")
-    tmp.write_text(score.format_score_table(new_entries))
-    tmp.replace(score_file)
-    return 0
-
-
-def cmd_text_strip_ansi(args: argparse.Namespace) -> int:
-    sys.stdout.write(text.strip_ansi(args.text))
-    return 0
-
-
-def cmd_text_sanitize_name(args: argparse.Namespace) -> int:
-    sys.stdout.write(text.sanitize_name(args.text))
-    return 0
-
-
-def cmd_git_branch_to_dir(args: argparse.Namespace) -> int:
-    sys.stdout.write(git.branch_to_dir(args.name))
-    return 0
-
-
-def cmd_git_resolve_remote(args: argparse.Namespace) -> int:
-    remote = git.resolve_remote(Path(args.repo))
-    if remote is not None:
-        sys.stdout.write(remote)
-        sys.stdout.write("\n")
-    return 0
-
-
-def cmd_git_default_branch(args: argparse.Namespace) -> int:
-    branch = git.default_branch(Path(args.repo))
-    if branch is not None:
-        sys.stdout.write(branch)
-        sys.stdout.write("\n")
-    return 0
-
-
-def cmd_git_list_branches(args: argparse.Namespace) -> int:
-    for branch in git.list_branches(Path(args.repo)):
-        sys.stdout.write(branch)
-        sys.stdout.write("\n")
-    return 0
-
-
-def cmd_git_list_worktrees(args: argparse.Namespace) -> int:
-    for wt in git.list_worktrees(Path(args.repo)):
-        sys.stdout.write(f"{wt.path}\t{wt.branch}\n")
-    return 0
-
-
-def cmd_git_add_worktree(args: argparse.Namespace) -> int:
-    fallback = os.environ.get("TMUX_SESSIONS_DEFAULT_BRANCH") or "main"
-    path = git.add_worktree(
-        Path(args.repo),
-        Path(args.container),
-        branch=args.branch or None,
-        new_name=args.new_name or None,
-        default_branch_fallback=fallback,
-    )
-    sys.stdout.write(str(path))
-    sys.stdout.write("\n")
-    return 0
-
-
-def cmd_git_list_projects(args: argparse.Namespace) -> int:
-    home = os.environ.get("HOME", "")
-    raw_dirs = os.environ.get("TMUX_SESSIONS_PROJECTS_DIRS") or f"{home}/Projects"
-    max_depth = int(os.environ.get("TMUX_SESSIONS_MAX_DEPTH") or 6)
-    strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
-
-    roots: list[Path] = []
-    for entry in raw_dirs.split():
-        expanded = entry.replace("~", home, 1) if entry.startswith("~") else entry
-        roots.append(Path(expanded))
-
-    for project in git.list_git_projects(roots, max_depth=max_depth):
-        name = text.format_session_name(str(project), home=home, strip_prefixes=strip_prefixes)
-        sys.stdout.write(f"{name}\t{project}\n")
-    return 0
-
-
-def cmd_git_fetch_is_stale(args: argparse.Namespace) -> int:
-    repo = Path(args.repo)
-    common_dir_result = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--git-common-dir"],
-        capture_output=True,
-        text=True,
-    )
-    if common_dir_result.returncode != 0:
-        return 0
-    common_dir = Path(common_dir_result.stdout.strip())
-    if not common_dir.is_absolute():
-        common_dir = repo / common_dir
-    fetch_head = common_dir / "FETCH_HEAD"
-    try:
-        mtime: float | None = fetch_head.stat().st_mtime
-    except FileNotFoundError:
-        mtime = None
-    stale = git.fetch_is_stale(mtime, now=time.time(), window_secs=args.window)
-    return 0 if stale else 1
-
-
-def cmd_git_rename_worktree(args: argparse.Namespace) -> int:
-    try:
-        new_path = git.rename_worktree(
-            Path(args.repo),
-            Path(args.container),
-            Path(args.wt_path),
-            new_name=args.new_name,
-        )
-    except RuntimeError as exc:
-        sys.stderr.write(f"{exc}\n")
-        return 1
-    sys.stdout.write(str(new_path))
-    sys.stdout.write("\n")
-    return 0
-
-
-def cmd_tmux_session_id(args: argparse.Namespace) -> int:
-    sid = tmux.session_id(args.name)
-    if sid is not None:
-        sys.stdout.write(sid)
-        sys.stdout.write("\n")
-    return 0
-
-
-def cmd_tmux_switch_or_create(args: argparse.Namespace) -> int:
-    name = args.name
-    if not name:
-        home = os.environ.get("HOME", "")
-        strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
-        name = text.format_session_name(args.path, home=home, strip_prefixes=strip_prefixes)
-    tmux.switch_or_create(Path(args.path), name)
-    return 0
-
-
-def cmd_picker_branch_entries(args: argparse.Namespace) -> int:
-    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
-    icons = picker.IconSet.from_style(style)
-    for line in picker.gen_branch_picker_entries(Path(args.repo), icons=icons):
-        sys.stdout.write(line)
-        sys.stdout.write("\n")
-    return 0
-
-
-def cmd_picker_pick_branch(args: argparse.Namespace) -> int:
-    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
-    icons = picker.IconSet.from_style(style)
-    # Random ephemeral port for fzf --listen, mirroring the bash range.
-    listen_port = 51200 + secrets.randbelow(14336)
-    choice = picker.pick_branch(
-        Path(args.repo),
-        icons=icons,
-        fetch_reload_argv=_fetch_reload_argv(),
-        listen_port=listen_port,
-        now=time.time(),
-    )
-    if choice.kind == "back":
-        return 1
-    if choice.kind == "cancel":
-        return 2
-    sys.stdout.write(f"{choice.kind}:{choice.name}\n")
-    return 0
 
 
 def cmd_fetch_reload(args: argparse.Namespace) -> int:
@@ -498,10 +106,6 @@ def cmd_fetch_reload(args: argparse.Namespace) -> int:
     icons = picker.IconSet.from_style(style)
     repo = Path(args.repo)
     tmpfile = Path(args.tmpfile)
-
-    if args.no_fork:
-        fetch_reload.fetch_and_reload(repo, tmpfile, args.port, args.header_base, icons=icons)
-        return 0
 
     # Fork once so fzf's execute-silent caller returns immediately while
     # we keep running. Parent exits 0; child detaches with setsid and
@@ -518,50 +122,12 @@ def cmd_fetch_reload(args: argparse.Namespace) -> int:
         os._exit(1)
 
 
-def cmd_sessions_list_projects(args: argparse.Namespace) -> int:
-    home = os.environ.get("HOME", "")
-    raw_dirs = os.environ.get("TMUX_SESSIONS_PROJECTS_DIRS") or f"{home}/Projects"
-    max_depth = int(os.environ.get("TMUX_SESSIONS_MAX_DEPTH") or 6)
-    strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
-    manual_spec = os.environ.get("TMUX_SESSIONS_MANUAL_SESSIONS") or ""
-
-    roots: list[Path] = []
-    for entry in raw_dirs.split():
-        expanded = entry.replace("~", home, 1) if entry.startswith("~") else entry
-        roots.append(Path(expanded))
-
-    for name, path in sessions.list_projects(
-        roots,
-        max_depth=max_depth,
-        home=home,
-        strip_prefixes=strip_prefixes,
-        manual_spec=manual_spec,
-    ):
-        sys.stdout.write(f"{name}\t{path}\n")
-    return 0
-
-
-def cmd_sessions_is_orphaned_worktree(args: argparse.Namespace) -> int:
-    path = Path(args.path)
-    return 0 if sessions.is_orphaned_worktree(path, container=path.parent) else 1
-
-
-def cmd_sessions_build_entries(args: argparse.Namespace) -> int:
-    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
-    icons = picker.IconSet.from_style(style)
-    config = _resolve_build_entries_config()
-    for line in sessions.build_entries(icons=icons, **config):  # type: ignore[arg-type]
-        sys.stdout.write(line)
-        sys.stdout.write("\n")
-    return 0
-
-
 def _resolve_build_entries_config() -> dict[str, object]:
     """Pull the env-driven knobs that ``build_entries`` consumes.
 
-    Shared between ``cmd_sessions_build_entries`` and the
-    ``_action_ctrl_r`` worktree-rename branch, which has to rebuild the
-    picker tmpfile after the rename moves the row's path.
+    Shared between ``cmd_sessions_manage`` and the ``_action_ctrl_r``
+    worktree-rename branch, which has to rebuild the picker tmpfile
+    after the rename moves the row's path.
     """
     home = os.environ.get("HOME", "")
     raw_dirs = os.environ.get("TMUX_SESSIONS_PROJECTS_DIRS") or f"{home}/Projects"
@@ -602,10 +168,8 @@ def _resolve_build_entries_config() -> dict[str, object]:
 def _prompt_rename(initial: str) -> str | None:
     """Drive the inline fzf rename prompt; return sanitised name or None.
 
-    Mirrors the bash ``echo "" | fzf $FZF_INLINE --print-query --query
-    "$initial" --expect ctrl-bs`` invocation: empty stdin, free-text
-    query, optional ``ctrl-bs`` cancel. Returns ``None`` on Esc, on
-    ctrl-bs, or when sanitisation produces an empty string.
+    Empty stdin, free-text query, ``ctrl-bs`` cancel. Returns ``None``
+    on Esc, on ctrl-bs, or when sanitisation produces an empty string.
     """
     result = subprocess.run(
         [
@@ -771,11 +335,7 @@ def _git_toplevel(path: str) -> str:
 
 
 def _confirm_orphan_delete(wt_path: str) -> bool:
-    """Drive the inline No/Yes fzf prompt for orphan-dir deletion.
-
-    Mirrors the bash ``printf 'No\\nYes' | fzf $FZF_INLINE --no-sort
-    --prompt "Delete $(basename "$wt_path")? "`` invocation.
-    """
+    """Drive the inline No/Yes fzf prompt for orphan-dir deletion."""
     result = subprocess.run(
         [
             "fzf",
@@ -868,18 +428,8 @@ def cmd_sessions_display_name(args: argparse.Namespace) -> int:
     return 0
 
 
-def _read_lines(path: Path) -> list[str]:
-    return path.read_text().splitlines() if path.exists() else []
-
-
 def _container_for_repo(repo_path: str) -> str:
-    """Return the directory holding sibling worktrees for ``repo_path``.
-
-    Mirrors the bash one-liner ``git worktree list --porcelain | awk
-    '/^worktree /{print $2; exit}' | xargs dirname``: the first
-    ``worktree`` line points at the main checkout, whose parent is the
-    container shared with linked worktrees.
-    """
+    """Return the directory holding sibling worktrees for ``repo_path``."""
     result = subprocess.run(
         ["git", "-C", repo_path, "worktree", "list", "--porcelain"],
         capture_output=True,
@@ -897,8 +447,7 @@ def _prompt_new_session_name() -> str:
     """Drive the inline fzf prompt for the new-session sentinel.
 
     Returns the sanitised name, or ``""`` when the user cancels (Esc,
-    ctrl-bs, or empty input). Mirrors the bash ``echo "" | fzf $FZF_POPUP
-    --print-query --no-select-1 --prompt 'Session name: '`` invocation.
+    ctrl-bs, or empty input).
     """
     result = subprocess.run(
         [
@@ -928,13 +477,7 @@ def _prompt_new_session_name() -> str:
 
 
 def _bump_score_and_switch(name: str, session_path: Path) -> None:
-    """Bump the recency score for ``name`` and switch to (or create) the session.
-
-    Resolves env knobs the same way ``cmd_score_update`` and
-    ``cmd_tmux_switch_or_create`` do so the behaviour is identical to
-    the ``update_score`` + ``switch_or_create_session`` pair the bash
-    main loop ran in sequence.
-    """
+    """Bump the recency score for ``name`` and switch to (or create) the session."""
     score_file = Path(os.environ.get("SCORE_FILE", ""))
     half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
     half_life_secs = half_life_days * 24 * 3600
@@ -956,22 +499,15 @@ def _bump_score_and_switch(name: str, session_path: Path) -> None:
 
 
 def _fetch_reload_argv() -> list[str]:
-    """Argv prefix for invoking the in-package fetch-reload subcommand.
-
-    Re-uses the running interpreter so the picker drives the same Python
-    used to launch the dispatcher (matters when the user invokes via a
-    venv or alternative ``python3``).
-    """
+    """Argv prefix for invoking the in-package fetch-reload subcommand."""
     return [sys.executable, "-m", "tmux_sessions", "fetch-reload"]
 
 
 def _resolve_score_file_env() -> str:
-    """Match the bash ``SCORE_FILE`` derivation in ``common.sh``.
+    """Resolve ``SCORE_FILE`` with the configured fallbacks.
 
-    The bash side falls back to ``TMUX_SESSIONS_SCORES_FILE`` then to
-    ``$HOME/.local/share/tmux-sessions/scores.tsv``. The Python
-    sub-handlers expect ``SCORE_FILE`` to be set in the env they
-    inherit, so we resolve and re-export it here.
+    ``SCORE_FILE`` wins; otherwise ``TMUX_SESSIONS_SCORES_FILE``;
+    otherwise ``$HOME/.local/share/tmux-sessions/scores.tsv``.
     """
     explicit = os.environ.get("SCORE_FILE")
     if explicit:
@@ -984,14 +520,7 @@ def _resolve_score_file_env() -> str:
 
 
 def cmd_sessions_manage(args: argparse.Namespace) -> int:
-    """Run the top-level session picker fzf loop.
-
-    Mirrors the bash ``manage_sessions`` function in ``sessions.sh``:
-    seed a tmpfile via ``build_entries``, drive fzf with the same flags
-    and bindings (binds invoke ``python3 -m tmux_sessions sessions
-    action ...`` instead of the legacy ``$self --action ...`` shim), and
-    dispatch on the chosen key. Returns 0 once the loop exits.
-    """
+    """Run the top-level session picker fzf loop."""
     score_file = _resolve_score_file_env()
     os.environ["SCORE_FILE"] = score_file
 
@@ -1007,9 +536,8 @@ def cmd_sessions_manage(args: argparse.Namespace) -> int:
     try:
         return _manage_loop(tmpfile, icons=icons)
     finally:
-        for path in (tmpfile, tmpfile.with_name(tmpfile.name + ".new")):
-            with contextlib.suppress(FileNotFoundError):
-                path.unlink()
+        with contextlib.suppress(FileNotFoundError):
+            tmpfile.unlink()
 
 
 def _manage_loop(tmpfile: Path, *, icons: picker.IconSet) -> int:
@@ -1114,12 +642,7 @@ def _manage_loop(tmpfile: Path, *, icons: picker.IconSet) -> int:
 
 
 def _handle_ctrl_w(*, row_type: str, key2: str, icons: picker.IconSet) -> bool:
-    """Drive the ctrl-w (create-worktree) flow; return True to exit the loop.
-
-    Returns False to continue the picker loop (Esc-to-back from the
-    branch picker, or no repo resolved). Returns True after a successful
-    worktree creation + session switch so the parent loop can exit 0.
-    """
+    """Drive the ctrl-w (create-worktree) flow; return True to exit the loop."""
     if row_type == "p":
         repo_path = _git_toplevel(key2)
     elif row_type == "s":
@@ -1149,8 +672,8 @@ def _handle_ctrl_w(*, row_type: str, key2: str, icons: picker.IconSet) -> bool:
         now=time.time(),
     )
     if choice.kind == "cancel":
-        # Bash treats Esc here as "close all" — return True so the
-        # caller exits 0 instead of redrawing the parent picker.
+        # Esc here is "close all" — return True so the caller exits 0
+        # instead of redrawing the parent picker.
         return True
     if choice.kind == "back":
         return False
@@ -1182,13 +705,6 @@ def _handle_ctrl_w(*, row_type: str, key2: str, icons: picker.IconSet) -> bool:
     name = text.format_session_name(str(wt_path), home=home, strip_prefixes=strip_prefixes)
     _bump_score_and_switch(name, wt_path)
     return True
-
-
-def cmd_text_format_session_name(args: argparse.Namespace) -> int:
-    home = os.environ.get("HOME", "")
-    strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
-    sys.stdout.write(text.format_session_name(args.path, home=home, strip_prefixes=strip_prefixes))
-    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

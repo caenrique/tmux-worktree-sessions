@@ -92,7 +92,6 @@ def test_invokes_python_dispatcher(tmux_stub: Callable[..., TmuxStub]) -> None:
     stub = tmux_stub()
     _run_tpm_entry(stub, options="")
     row = _bind_key_row(stub)
-    assert f"TMUX_PLUGIN_DIR='{_REPO_ROOT}'" in row
     assert f"PYTHONPATH='{_REPO_ROOT}/scripts'" in row
     assert "python3 -m tmux_sessions sessions manage" in row
 

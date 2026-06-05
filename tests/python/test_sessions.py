@@ -1,10 +1,10 @@
 """Tests for :mod:`tmux_sessions.sessions`.
 
-Pure-layer cases for ``parse_manual_sessions``,
-``is_orphaned_worktree``, and the action rewrites; CLI-layer cases that
-exercise ``sessions list-projects``, ``sessions is-orphaned-worktree``,
-and ``sessions action ctrl-x`` via ``main(...)`` mirror the
-corresponding bats coverage.
+Pure-layer cases for ``parse_manual_sessions``, ``list_projects``,
+``is_orphaned_worktree``, ``build_entries``, and the action-row
+rewrites; CLI-layer cases for the four production action subcommands
+(``ctrl-x``, ``ctrl-r``, ``ctrl-d``) plus ``display-name`` and
+``manage`` exercise ``main(...)`` end-to-end.
 """
 
 from __future__ import annotations
@@ -19,7 +19,9 @@ from tmux_sessions.picker import IconSet
 from tmux_sessions.sessions import (
     apply_ctrl_r_session_rename,
     apply_ctrl_x,
+    build_entries,
     is_orphaned_worktree,
+    list_projects,
     parse_manual_sessions,
     remove_project_row,
     remove_session_row,
@@ -90,29 +92,27 @@ def test_is_orphaned_worktree_missing_container_returns_false(tmp_path: Path) ->
     assert is_orphaned_worktree(candidate, container=missing) is False
 
 
-def _run_sessions_list_projects(
-    monkeypatch: pytest.MonkeyPatch,
+def _list_projects_pairs(
     *,
     projects_dir: Path,
     home: str,
     manual: str = "",
-    strip_prefixes: str = "",
-    max_depth: str = "4",
-) -> list[str]:
-    monkeypatch.setenv("HOME", home)
-    monkeypatch.setenv("TMUX_SESSIONS_PROJECTS_DIRS", str(projects_dir))
-    monkeypatch.setenv("TMUX_SESSIONS_MAX_DEPTH", max_depth)
-    monkeypatch.setenv("TMUX_SESSIONS_STRIP_PREFIXES", strip_prefixes)
-    monkeypatch.setenv("TMUX_SESSIONS_MANUAL_SESSIONS", manual)
-    stdout = io.StringIO()
-    monkeypatch.setattr("sys.stdout", stdout)
-    rc = main(["sessions", "list-projects"])
-    assert rc == 0
-    return stdout.getvalue().splitlines()
+    strip_prefixes: list[str] | None = None,
+    max_depth: int = 4,
+) -> list[tuple[str, str]]:
+    return [
+        (name, str(path))
+        for name, path in list_projects(
+            [projects_dir],
+            max_depth=max_depth,
+            home=home,
+            strip_prefixes=strip_prefixes or [],
+            manual_spec=manual,
+        )
+    ]
 
 
-def test_cli_list_projects_emits_one_row_per_git_project(
-    monkeypatch: pytest.MonkeyPatch,
+def test_list_projects_emits_one_row_per_git_project(
     tmp_path: Path,
     make_repo: Callable[..., Path],
 ) -> None:
@@ -121,72 +121,39 @@ def test_cli_list_projects_emits_one_row_per_git_project(
     foo = make_repo("projects/foo")
     bar = make_repo("projects/bar")
 
-    lines = _run_sessions_list_projects(monkeypatch, projects_dir=projects_dir, home=str(tmp_path))
+    pairs = _list_projects_pairs(projects_dir=projects_dir, home=str(tmp_path))
 
-    paths = [line.split("\t", 1)[1] for line in lines]
+    paths = [path for _, path in pairs]
     assert str(foo) in paths
     assert str(bar) in paths
 
 
-def test_cli_list_projects_appends_manual_sessions(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def test_list_projects_appends_manual_sessions(tmp_path: Path) -> None:
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
     cfg = tmp_path / "cfg"
     cfg.mkdir()
 
-    lines = _run_sessions_list_projects(
-        monkeypatch,
+    pairs = _list_projects_pairs(
         projects_dir=projects_dir,
         home=str(tmp_path),
         manual=f"dotfiles:{cfg}",
     )
 
-    assert f"dotfiles\t{cfg}" in lines
+    assert ("dotfiles", str(cfg)) in pairs
 
 
-def test_cli_list_projects_expands_tilde_in_manual_session_paths(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def test_list_projects_expands_tilde_in_manual_session_paths(tmp_path: Path) -> None:
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
 
-    lines = _run_sessions_list_projects(
-        monkeypatch,
+    pairs = _list_projects_pairs(
         projects_dir=projects_dir,
         home=str(tmp_path),
         manual="home:~/somewhere",
     )
 
-    assert f"home\t{tmp_path}/somewhere" in lines
-
-
-def test_cli_is_orphaned_worktree_exit_zero_when_sibling_has_dotgit(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    container = tmp_path / "wt"
-    orphan = container / "orphan"
-    realrepo = container / "realrepo"
-    orphan.mkdir(parents=True)
-    realrepo.mkdir(parents=True)
-    (realrepo / ".git").mkdir()
-
-    rc = main(["sessions", "is-orphaned-worktree", str(orphan)])
-    assert rc == 0
-
-
-def test_cli_is_orphaned_worktree_exit_one_when_no_sibling_repo(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    container = tmp_path / "lonely"
-    only = container / "only"
-    only.mkdir(parents=True)
-
-    rc = main(["sessions", "is-orphaned-worktree", str(only)])
-    assert rc == 1
+    assert ("home", f"{tmp_path}/somewhere") in pairs
 
 
 def test_apply_ctrl_x_inserts_project_row_above_n_sentinel() -> None:
@@ -265,31 +232,36 @@ def test_cli_action_ctrl_x_non_session_is_noop(
     assert tmpfile.read_text() == before
 
 
-def _run_sessions_build_entries(
-    monkeypatch: pytest.MonkeyPatch,
+def _build_entries_lines(
     *,
-    projects_dir: Path,
+    projects_roots: list[Path],
     home: str,
     icon_style: str = "none",
+    strip_prefixes: list[str] | None = None,
+    manual_spec: str = "",
+    max_depth: int = 4,
+    score_entries: list[tuple[str, float, float]] | None = None,
+    now: float = 0.0,
+    half_life_secs: float = 14 * 24 * 3600,
+    path_boost: float = 1.0,
 ) -> list[str]:
-    monkeypatch.setenv("HOME", home)
-    monkeypatch.setenv("TMUX_SESSIONS_PROJECTS_DIRS", str(projects_dir))
-    monkeypatch.setenv("TMUX_SESSIONS_MAX_DEPTH", "4")
-    monkeypatch.setenv("TMUX_SESSIONS_STRIP_PREFIXES", "")
-    monkeypatch.setenv("TMUX_SESSIONS_MANUAL_SESSIONS", "")
-    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", icon_style)
-    monkeypatch.setenv("TMUX_SESSIONS_SCORE_HALF_LIFE", "14")
-    monkeypatch.setenv("TMUX_SESSIONS_SCORE_PATH_BOOST", "1.0")
-    monkeypatch.setenv("SCORE_FILE", "")
-    stdout = io.StringIO()
-    monkeypatch.setattr("sys.stdout", stdout)
-    rc = main(["sessions", "build-entries"])
-    assert rc == 0
-    return stdout.getvalue().splitlines()
+    return list(
+        build_entries(
+            home=home,
+            strip_prefixes=strip_prefixes or [],
+            projects_roots=projects_roots,
+            max_depth=max_depth,
+            manual_spec=manual_spec,
+            icons=IconSet.from_style(icon_style),
+            score_entries=score_entries or [],
+            now=now,
+            half_life_secs=half_life_secs,
+            path_boost=path_boost,
+        )
+    )
 
 
-def test_cli_build_entries_project_only_ends_with_n_sentinel(
-    monkeypatch: pytest.MonkeyPatch,
+def test_build_entries_project_only_ends_with_n_sentinel(
     tmp_path: Path,
     tmux_stub: Callable[..., object],
     make_repo: Callable[..., Path],
@@ -299,13 +271,13 @@ def test_cli_build_entries_project_only_ends_with_n_sentinel(
     foo = make_repo("projects/foo")
     tmux_stub(sessions="")
 
-    lines = _run_sessions_build_entries(monkeypatch, projects_dir=projects_dir, home=str(tmp_path), icon_style="ascii")
+    lines = _build_entries_lines(projects_roots=[projects_dir], home=str(tmp_path), icon_style="ascii")
 
     assert any(line.startswith(f"p\t{foo}\t") for line in lines)
     assert lines[-1].startswith("n\t\tnew session\t")
 
 
-def test_cli_build_entries_pins_current_session_yellow(
+def test_build_entries_pins_current_session_yellow(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     tmux_stub: Callable[..., object],
@@ -315,14 +287,14 @@ def test_cli_build_entries_pins_current_session_yellow(
     monkeypatch.setenv("TMUX_STUB_CURRENT", "alpha")
     tmux_stub(sessions="alpha\t$1\t/p/alpha")
 
-    lines = _run_sessions_build_entries(monkeypatch, projects_dir=projects_dir, home=str(tmp_path))
+    lines = _build_entries_lines(projects_roots=[projects_dir], home=str(tmp_path))
 
     assert lines[0].startswith("s\t1\t")
     assert "alpha" in lines[0]
     assert "(current)" in lines[0]
 
 
-def test_cli_build_entries_pins_previous_session_green(
+def test_build_entries_pins_previous_session_green(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     tmux_stub: Callable[..., object],
@@ -333,7 +305,7 @@ def test_cli_build_entries_pins_previous_session_green(
     monkeypatch.setenv("TMUX_STUB_PREV", "beta")
     tmux_stub(sessions="alpha\t$1\t/p/alpha\nbeta\t$2\t/p/beta")
 
-    lines = _run_sessions_build_entries(monkeypatch, projects_dir=projects_dir, home=str(tmp_path))
+    lines = _build_entries_lines(projects_roots=[projects_dir], home=str(tmp_path))
 
     assert lines[0].startswith("s\t1\t")
     assert "(current)" in lines[0]
@@ -341,7 +313,7 @@ def test_cli_build_entries_pins_previous_session_green(
     assert "(previous)" in lines[1]
 
 
-def test_cli_build_entries_remaining_sessions_ordered_by_last_attached_desc(
+def test_build_entries_remaining_sessions_ordered_by_last_attached_desc(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     tmux_stub: Callable[..., object],
@@ -360,7 +332,7 @@ def test_cli_build_entries_remaining_sessions_ordered_by_last_attached_desc(
         ),
     )
 
-    lines = _run_sessions_build_entries(monkeypatch, projects_dir=projects_dir, home=str(tmp_path))
+    lines = _build_entries_lines(projects_roots=[projects_dir], home=str(tmp_path))
 
     assert lines[0].startswith("s\t1\t")  # alpha (current)
     assert lines[1].startswith("s\t2\t")  # beta (previous)
@@ -369,8 +341,7 @@ def test_cli_build_entries_remaining_sessions_ordered_by_last_attached_desc(
     assert lines[4].startswith("s\t3\t")  # gamma last_attached=800
 
 
-def test_cli_build_entries_filters_projects_matching_open_sessions(
-    monkeypatch: pytest.MonkeyPatch,
+def test_build_entries_filters_projects_matching_open_sessions(
     tmp_path: Path,
     tmux_stub: Callable[..., object],
     make_repo: Callable[..., Path],
@@ -385,13 +356,13 @@ def test_cli_build_entries_filters_projects_matching_open_sessions(
     proj_name = format_session_name(str(foo), home=str(tmp_path), strip_prefixes=[])
     tmux_stub(sessions=f"{proj_name}\t$3\t{foo}")
 
-    lines = _run_sessions_build_entries(monkeypatch, projects_dir=projects_dir, home=str(tmp_path))
+    lines = _build_entries_lines(projects_roots=[projects_dir], home=str(tmp_path))
 
     assert not any(line.startswith(f"p\t{foo}\t") for line in lines)
     assert any(proj_name in line for line in lines)
 
 
-def test_cli_build_entries_every_line_has_exactly_4_tsv_fields(
+def test_build_entries_every_line_has_exactly_4_tsv_fields(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     tmux_stub: Callable[..., object],
@@ -403,7 +374,7 @@ def test_cli_build_entries_every_line_has_exactly_4_tsv_fields(
     monkeypatch.setenv("TMUX_STUB_CURRENT", "alpha")
     tmux_stub(sessions="alpha\t$1\t/p/alpha")
 
-    lines = _run_sessions_build_entries(monkeypatch, projects_dir=projects_dir, home=str(tmp_path))
+    lines = _build_entries_lines(projects_roots=[projects_dir], home=str(tmp_path))
 
     for line in lines:
         assert line.count("\t") == 3, f"bad line: {line!r}"
