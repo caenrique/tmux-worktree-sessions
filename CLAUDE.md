@@ -4,55 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development
 
-The dev environment is driven by [devenv](https://devenv.sh/), which
-provisions tmux, fzf, fd, bats, shellcheck, git, and a `uv`-managed
-Python venv in one Nix shell. Install [Nix](https://nixos.org/download)
-and devenv, then enter the shell:
+See [BUILD.md](BUILD.md) for the full dev setup: `devenv shell`,
+`devenv test`, individual task names, dependency management, lint
+configuration, and test layout. Quick reference:
 
 ```sh
-devenv shell        # uv sync runs automatically; all tools land on PATH
-```
-
-Inside the shell, run the full suite or any individual task:
-
-```sh
-devenv test                                    # run every check (what CI runs)
-devenv tasks run python:test                   # pytest only
-devenv tasks run python:lint                   # ruff check
-devenv tasks run python:format-check           # ruff format --check
-devenv tasks run python:typecheck              # mypy --strict
-devenv tasks run bats:test                     # full bats suite
-devenv tasks run shellcheck:lint               # shellcheck on shell sources
-```
-
-Each task is also wired with `before = [ "devenv:enterTest" ]`, so
-`devenv test` is the single entry point that drives them all.
-
-Tools are also on PATH directly inside the shell, so finer-grained
-invocations work too:
-
-```sh
-bats tests/common.bats                         # one bats file
-bats --filter "format_session_name" tests/     # one function
-bats --print-output-on-failure tests/          # show captured output on failure
-pytest tests/python/test_score.py              # one pytest file
-```
-
-For ad-hoc smoke checks, you can still drive a script directly:
-
-```sh
-TMUX_SESSIONS_PROJECTS_DIRS="$HOME/Projects" \
-TMUX_SESSIONS_ICON_STYLE=nerd \
-bash scripts/sessions.sh
+devenv shell                              # enter dev shell (uv sync runs automatically)
+devenv test                               # run every check (what CI runs)
+devenv tasks run python:test              # one task at a time
+uv run pytest tests/python/test_score.py  # one pytest file
+bats --filter "name" tests/               # one bats function
 ```
 
 A migration is in progress to move the bash scripts to a typed Python
 package under `scripts/tmux_sessions/` (see `docs/python-migration.md`).
-Python ≥ 3.8 is required; dev dependencies are declared in
-`pyproject.toml` under `[dependency-groups].dev` and synced by `uv`.
-All Python code uses **explicit type annotations** on every function
-signature; `mypy --strict` must pass. `tests/python/` mirrors the bats
-suite as functions are migrated.
+Python ≥ 3.8 is required; all Python code uses **explicit type
+annotations** on every function signature, and `mypy --strict` must
+pass. `tests/python/` mirrors the bats suite as functions are migrated.
 
 ## Change policy
 

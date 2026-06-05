@@ -27,23 +27,26 @@
 
   # Each task is individually runnable (`devenv tasks run python:test`)
   # and also wired before `devenv:enterTest` so `devenv test` triggers
-  # the whole suite. Tools are invoked by bare name — the uv venv and
-  # the system packages above are already on PATH inside the dev shell.
+  # the whole suite. The uv venv is auto-activated only inside the
+  # interactive `devenv shell`, not in task execution contexts, so the
+  # Python tasks shell out via `uv run` to pick up pytest/ruff/mypy from
+  # the project venv. System tools (bats, shellcheck) come from
+  # `packages` above and are on PATH unconditionally.
   tasks = {
     "python:test" = {
-      exec = "pytest tests/python";
+      exec = "uv run pytest tests/python";
       before = [ "devenv:enterTest" ];
     };
     "python:lint" = {
-      exec = "ruff check scripts/ tests/python";
+      exec = "uv run ruff check scripts/ tests/python";
       before = [ "devenv:enterTest" ];
     };
     "python:format-check" = {
-      exec = "ruff format --check scripts/ tests/python";
+      exec = "uv run ruff format --check scripts/ tests/python";
       before = [ "devenv:enterTest" ];
     };
     "python:typecheck" = {
-      exec = "mypy scripts/tmux_sessions";
+      exec = "uv run mypy scripts/tmux_sessions";
       before = [ "devenv:enterTest" ];
     };
     "bats:test" = {
