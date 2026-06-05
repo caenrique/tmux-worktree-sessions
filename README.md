@@ -76,11 +76,13 @@ set -g @tmux-sessions-manual-sessions 'Notes:~/Notes dotfiles:~/.config'
 
 ### Status bar display names
 
-The session picker derives display names from filesystem paths. If you want the tmux status bar to show the same short names (instead of raw paths with dots converted to underscores), add this to your `tmux.conf`:
+The session picker derives display names from filesystem paths. To show those same short names in the tmux status bar (instead of raw paths with dots converted to underscores), drop `#{session_display_name}` into your `status-left` or `status-right`:
 
 ```tmux
-set -g status-left '#(PYTHONPATH=~/.config/tmux/plugins/tmux-sessions/scripts python3 -m tmux_sessions sessions display-name "#{session_path}" "#{session_name}")'
+set -g status-left '#{session_display_name} | %H:%M'
 ```
+
+The placeholder is expanded once when the plugin is loaded by TPM, so make sure your `status-left` / `status-right` are set **before** the `run '~/.tmux/plugins/tpm/tpm'` line in your `tmux.conf`.
 
 ## Usage
 

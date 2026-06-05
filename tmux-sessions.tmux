@@ -34,3 +34,21 @@ tmux bind-key -n "$_key" run-shell -b "\
   TMUX_SESSIONS_ICON_STYLE='$_icon_style' \
   PYTHONPATH='$PLUGIN_DIR/scripts' \
   python3 -m tmux_sessions sessions manage"
+
+# Status-bar widget: replace `#{session_display_name}` in status-left
+# and status-right with a `#(...)` shell-command that calls
+# `sessions display-name`. Single-quoted env values pass through to
+# /bin/sh verbatim; double-quoted format tokens are substituted by
+# tmux at status-redraw time. Substitution runs once at plugin-load,
+# so users must set status-left/right before TPM's `run` line.
+_widget='#{session_display_name}'
+_widget_cmd="#(TMUX_SESSIONS_STRIP_PREFIXES='$_strip_prefixes' PYTHONPATH='$PLUGIN_DIR/scripts' python3 -m tmux_sessions sessions display-name \"#{session_path}\" \"#{session_name}\")"
+
+for _option in status-left status-right; do
+  _value=$(_get "$_option")
+  case "$_value" in
+    *"$_widget"*)
+      tmux set-option -gq "$_option" "${_value//"$_widget"/$_widget_cmd}"
+      ;;
+  esac
+done
