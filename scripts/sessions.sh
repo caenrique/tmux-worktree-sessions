@@ -22,13 +22,6 @@ list_projects() {
     _tmux_sessions_py sessions list-projects
 }
 
-# Catppuccin Mocha green/reset used by _action_ctrl_r when re-rendering a
-# session row after rename. build_entries itself defers to Python now;
-# these constants stay only because the rename path still rebuilds the
-# row in bash.
-_GREEN=$'\033[38;2;166;227;161m'
-_RESET=$'\033[0m'
-
 # Emit the unified 4-field TSV list consumed by manage_sessions.
 # Format: type<TAB>key<TAB>search<TAB>display
 #   - search:  clean fzf-matchable text (no icons, no colours, no
@@ -122,56 +115,15 @@ _action_ctrl_x() {
 # ctrl-r: rename worktree (branch + dir + repair) when on a linked worktree;
 #         rename tmux session only otherwise.
 _action_ctrl_r() {
-  local type="$1" id="$2" tmpfile="$3"
-
-  local target_path
-  if [[ "$type" == "s" ]]; then
-    local tmux_id="\$$id"
-    target_path=$(tmux display-message -p -t "$tmux_id" '#{session_path}' 2>/dev/null)
-  elif [[ "$type" == "p" ]]; then
-    target_path="$id"
-  else
-    return
-  fi
-
-  local git_dir
-  git_dir=$(git -C "$target_path" rev-parse --git-dir 2>/dev/null)
-
-  if [[ "$git_dir" == *"worktrees"* ]]; then
-    local main_wt container
-    main_wt=$(git -C "$target_path" worktree list --porcelain \
-      | awk '/^worktree /{print $2; exit}')
-    container=$(dirname "$main_wt")
-    rename_worktree "$main_wt" "$container" "$target_path"
-    build_entries > "$tmpfile"
-
-  elif [[ "$type" == "s" ]]; then
-    local tmux_id="\$$id"
-    local clean_name
-    clean_name=$(grep $'^s\t'"$id"$'\t' "$tmpfile" | cut -f3)
-    local rename_output rename_rc rename_key new_name
-    rename_output=$(echo "" | fzf $FZF_INLINE \
-      --print-query --no-select-1 \
-      --query "$clean_name" \
-      --prompt "Rename to: " \
-      --header "enter:rename  ctrl-bs:cancel" \
-      --expect "ctrl-bs")
-    rename_rc=$?
-    [[ $rename_rc -eq 130 ]] && return
-    rename_key=$(printf '%s' "$rename_output" | sed -n '2p')
-    [[ "$rename_key" == "ctrl-bs" ]] && return
-    new_name=$(sanitize_name "$(printf '%s' "$rename_output" | head -1)")
-    [[ -z "$new_name" || "$new_name" == "$clean_name" ]] && return
-    tmux rename-session -t "$tmux_id" "$new_name"
-    local new_display="${_GREEN}${_ICON_SESSION}${_ICON_SEP}${new_name}${_RESET}"
-    NEW_SEARCH="$new_name" NEW_DISPLAY="$new_display" \
-      awk -F'\t' -v OFS='\t' -v id="$id" \
-        '$1=="s" && $2==id { $3=ENVIRON["NEW_SEARCH"]; $4=ENVIRON["NEW_DISPLAY"] } { print }' \
-        "$tmpfile" > "${tmpfile}.new" && mv "${tmpfile}.new" "$tmpfile"
-
-  else
-    tmux display-message -d 2000 "ctrl-r: not a linked worktree"
-  fi
+  SCORE_FILE="$SCORE_FILE" \
+  TMUX_SESSIONS_ICON_STYLE="$_ICON_STYLE" \
+  TMUX_SESSIONS_PROJECTS_DIRS="${TMUX_SESSIONS_PROJECTS_DIRS:-$HOME/Projects}" \
+  TMUX_SESSIONS_MAX_DEPTH="${TMUX_SESSIONS_MAX_DEPTH:-6}" \
+  TMUX_SESSIONS_STRIP_PREFIXES="${TMUX_SESSIONS_STRIP_PREFIXES:-}" \
+  TMUX_SESSIONS_MANUAL_SESSIONS="${TMUX_SESSIONS_MANUAL_SESSIONS:-}" \
+  TMUX_SESSIONS_SCORE_HALF_LIFE="${TMUX_SESSIONS_SCORE_HALF_LIFE:-14}" \
+  TMUX_SESSIONS_SCORE_PATH_BOOST="${TMUX_SESSIONS_SCORE_PATH_BOOST:-1.0}" \
+    _tmux_sessions_py sessions action ctrl-r "$1" "$2" "$3"
 }
 
 manage_sessions() {

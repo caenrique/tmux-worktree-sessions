@@ -17,6 +17,7 @@ import pytest
 from tmux_sessions.__main__ import main
 from tmux_sessions.picker import IconSet
 from tmux_sessions.sessions import (
+    apply_ctrl_r_session_rename,
     apply_ctrl_x,
     is_orphaned_worktree,
     parse_manual_sessions,
@@ -404,3 +405,66 @@ def test_cli_build_entries_every_line_has_exactly_4_tsv_fields(
 
     for line in lines:
         assert line.count("\t") == 3, f"bad line: {line!r}"
+
+
+def test_apply_ctrl_r_session_rename_rewrites_search_and_display() -> None:
+    icons = IconSet.from_style("none")
+    lines = [
+        "s\t3\told-name\told-display",
+        "p\t/p/foo\tfoo\tfoo",
+    ]
+    out = apply_ctrl_r_session_rename(lines, sid="3", new_name="new-name", icons=icons)
+    assert out[0].startswith("s\t3\tnew-name\t")
+    assert "new-name" in out[0]
+    assert out[1] == "p\t/p/foo\tfoo\tfoo"
+
+
+def test_apply_ctrl_r_session_rename_no_match_returns_lines_unchanged() -> None:
+    icons = IconSet.from_style("none")
+    lines = ["p\t/p/foo\tfoo\tfoo"]
+    out = apply_ctrl_r_session_rename(lines, sid="9", new_name="x", icons=icons)
+    assert out == lines
+
+
+def test_cli_action_ctrl_r_session_non_worktree_calls_tmux_rename(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+    fzf_stub: object,
+) -> None:
+    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    stub = tmux_stub(sessions=f"alpha\t$3\t{plain}")
+    fzf_stub.respond("shiny new")  # type: ignore[attr-defined]
+    tmpfile = tmp_path / "entries"
+    tmpfile.write_text("s\t3\talpha\talpha\n")
+
+    rc = main(["sessions", "action", "ctrl-r", "s", "3", str(tmpfile)])
+    assert rc == 0
+
+    invocations = stub.invocations()  # type: ignore[attr-defined]
+    assert any(inv[:4] == ["tmux", "rename-session", "-t", "$3"] and inv[4:] == ["shiny-new"] for inv in invocations), (
+        invocations
+    )
+
+
+def test_cli_action_ctrl_r_project_non_worktree_displays_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+) -> None:
+    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    stub = tmux_stub()
+    tmpfile = tmp_path / "entries"
+    tmpfile.write_text(f"p\t{plain}\tplain\tplain\n")
+
+    rc = main(["sessions", "action", "ctrl-r", "p", str(plain), str(tmpfile)])
+    assert rc == 0
+
+    invocations = stub.invocations()  # type: ignore[attr-defined]
+    assert any(
+        inv[:2] == ["tmux", "display-message"] and "ctrl-r: not a linked worktree" in inv for inv in invocations
+    ), invocations

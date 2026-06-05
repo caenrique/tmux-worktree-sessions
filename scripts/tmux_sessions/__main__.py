@@ -233,6 +233,15 @@ def build_parser() -> argparse.ArgumentParser:
     ctrl_x_p.add_argument("tmpfile", help="picker entries tmpfile to mutate in place")
     ctrl_x_p.set_defaults(handler=cmd_sessions_action_ctrl_x)
 
+    ctrl_r_p = action_sub.add_parser(
+        "ctrl-r",
+        help="rename a worktree (branch+dir+repair) or a tmux session",
+    )
+    ctrl_r_p.add_argument("type", help="picker entry type: 's', 'p', or 'n'")
+    ctrl_r_p.add_argument("id", help="session id (without leading $) or project path")
+    ctrl_r_p.add_argument("tmpfile", help="picker entries tmpfile to mutate in place")
+    ctrl_r_p.set_defaults(handler=cmd_sessions_action_ctrl_r)
+
     fetch_reload_p = sub.add_parser(
         "fetch-reload",
         help="background-fetch git, regenerate branch entries, post reload to fzf",
@@ -516,17 +525,30 @@ def cmd_sessions_is_orphaned_worktree(args: argparse.Namespace) -> int:
 
 
 def cmd_sessions_build_entries(args: argparse.Namespace) -> int:
+    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
+    icons = picker.IconSet.from_style(style)
+    config = _resolve_build_entries_config()
+    for line in sessions.build_entries(icons=icons, **config):  # type: ignore[arg-type]
+        sys.stdout.write(line)
+        sys.stdout.write("\n")
+    return 0
+
+
+def _resolve_build_entries_config() -> dict[str, object]:
+    """Pull the env-driven knobs that ``build_entries`` consumes.
+
+    Shared between ``cmd_sessions_build_entries`` and the
+    ``_action_ctrl_r`` worktree-rename branch, which has to rebuild the
+    picker tmpfile after the rename moves the row's path.
+    """
     home = os.environ.get("HOME", "")
     raw_dirs = os.environ.get("TMUX_SESSIONS_PROJECTS_DIRS") or f"{home}/Projects"
     max_depth = int(os.environ.get("TMUX_SESSIONS_MAX_DEPTH") or 6)
     strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
     manual_spec = os.environ.get("TMUX_SESSIONS_MANUAL_SESSIONS") or ""
-    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
     half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
     path_boost = float(os.environ.get("TMUX_SESSIONS_SCORE_PATH_BOOST") or 1.0)
     score_file = os.environ.get("SCORE_FILE", "")
-
-    icons = picker.IconSet.from_style(style)
 
     roots: list[Path] = []
     for entry in raw_dirs.split():
@@ -542,21 +564,55 @@ def cmd_sessions_build_entries(args: argparse.Namespace) -> int:
         score_text = ""
     score_entries = score.parse_score_table(score_text)
 
-    for line in sessions.build_entries(
-        home=home,
-        strip_prefixes=strip_prefixes,
-        projects_roots=roots,
-        max_depth=max_depth,
-        manual_spec=manual_spec,
-        icons=icons,
-        score_entries=score_entries,
-        now=time.time(),
-        half_life_secs=half_life_days * 24 * 3600,
-        path_boost=path_boost,
-    ):
-        sys.stdout.write(line)
-        sys.stdout.write("\n")
-    return 0
+    return {
+        "home": home,
+        "strip_prefixes": strip_prefixes,
+        "projects_roots": roots,
+        "max_depth": max_depth,
+        "manual_spec": manual_spec,
+        "score_entries": score_entries,
+        "now": time.time(),
+        "half_life_secs": half_life_days * 24 * 3600,
+        "path_boost": path_boost,
+    }
+
+
+def _prompt_rename(initial: str) -> str | None:
+    """Drive the inline fzf rename prompt; return sanitised name or None.
+
+    Mirrors the bash ``echo "" | fzf $FZF_INLINE --print-query --query
+    "$initial" --expect ctrl-bs`` invocation: empty stdin, free-text
+    query, optional ``ctrl-bs`` cancel. Returns ``None`` on Esc, on
+    ctrl-bs, or when sanitisation produces an empty string.
+    """
+    result = subprocess.run(
+        [
+            "fzf",
+            *picker.FZF_INLINE_FLAGS,
+            "--print-query",
+            "--no-select-1",
+            "--query",
+            initial,
+            "--prompt",
+            "Rename to: ",
+            "--header",
+            "enter:rename  ctrl-bs:cancel",
+            "--expect",
+            "ctrl-bs",
+        ],
+        input="",
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 130:
+        return None
+    out_lines = result.stdout.split("\n")
+    query = out_lines[0] if out_lines else ""
+    key = out_lines[1] if len(out_lines) > 1 else ""
+    if key == "ctrl-bs":
+        return None
+    sanitised = text.sanitize_name(query)
+    return sanitised or None
 
 
 def cmd_sessions_action_ctrl_x(args: argparse.Namespace) -> int:
@@ -577,6 +633,100 @@ def cmd_sessions_action_ctrl_x(args: argparse.Namespace) -> int:
     lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
     new_lines = sessions.apply_ctrl_x(lines, sid=args.id, sess_path=sess_path, icons=icons)
     tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+    return 0
+
+
+def cmd_sessions_action_ctrl_r(args: argparse.Namespace) -> int:
+    if args.type == "s":
+        tmux_id = f"${args.id}"
+        target_path_result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", tmux_id, "#{session_path}"],
+            capture_output=True,
+            text=True,
+        )
+        target_path = target_path_result.stdout.strip()
+    elif args.type == "p":
+        target_path = args.id
+    else:
+        return 0
+
+    git_dir_result = subprocess.run(
+        ["git", "-C", target_path, "rev-parse", "--git-dir"],
+        capture_output=True,
+        text=True,
+    )
+    git_dir = git_dir_result.stdout.strip() if git_dir_result.returncode == 0 else ""
+
+    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
+    icons = picker.IconSet.from_style(style)
+    tmpfile = Path(args.tmpfile)
+
+    if "worktrees" in git_dir:
+        porcelain = subprocess.run(
+            ["git", "-C", target_path, "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+        )
+        main_wt = ""
+        for porcelain_line in porcelain.stdout.splitlines():
+            if porcelain_line.startswith("worktree "):
+                main_wt = porcelain_line[len("worktree ") :]
+                break
+        if not main_wt:
+            return 0
+        container = str(Path(main_wt).parent)
+
+        old_branch_result = subprocess.run(
+            ["git", "-C", target_path, "branch", "--show-current"],
+            capture_output=True,
+            text=True,
+        )
+        old_branch = old_branch_result.stdout.strip()
+        if not old_branch:
+            sys.stderr.write("Cannot rename: worktree is in detached HEAD state\n")
+            return 1
+        new_name = _prompt_rename(old_branch)
+        if not new_name or new_name == old_branch:
+            return 0
+        try:
+            git.rename_worktree(
+                Path(main_wt),
+                Path(container),
+                Path(target_path),
+                new_name=new_name,
+            )
+        except RuntimeError as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 1
+        config = _resolve_build_entries_config()
+        rebuilt = list(sessions.build_entries(icons=icons, **config))  # type: ignore[arg-type]
+        tmpfile.write_text("\n".join(rebuilt) + ("\n" if rebuilt else ""))
+        return 0
+
+    if args.type == "s":
+        lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+        clean_name = ""
+        for line in lines:
+            fields = line.split("\t")
+            if len(fields) >= 3 and fields[0] == "s" and fields[1] == args.id:
+                clean_name = fields[2]
+                break
+        new_name = _prompt_rename(clean_name)
+        if not new_name or new_name == clean_name:
+            return 0
+        tmux_id = f"${args.id}"
+        subprocess.run(
+            ["tmux", "rename-session", "-t", tmux_id, new_name],
+            capture_output=True,
+        )
+        new_lines = sessions.apply_ctrl_r_session_rename(lines, sid=args.id, new_name=new_name, icons=icons)
+        tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+        return 0
+
+    subprocess.run(
+        ["tmux", "display-message", "-d", "2000", "ctrl-r: not a linked worktree"],
+        capture_output=True,
+    )
     return 0
 
 

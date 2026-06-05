@@ -103,6 +103,34 @@ def apply_ctrl_x(
     return result
 
 
+def apply_ctrl_r_session_rename(
+    lines: list[str],
+    *,
+    sid: str,
+    new_name: str,
+    icons: IconSet,
+) -> list[str]:
+    """Rewrite the search and display columns of the matching session row.
+
+    Mirrors the awk one-liner in the bash ``_action_ctrl_r`` session
+    branch: when a row's first two columns are ``s`` and ``sid``,
+    overwrite column 3 with ``new_name`` and column 4 with the green-
+    coloured icon+name display so the picker reflects the rename without
+    needing a full ``build_entries`` rebuild.
+    """
+    new_display = f"{GREEN}{icons.session}{icons.sep}{new_name}{RESET}"
+    result: list[str] = []
+    for line in lines:
+        fields = line.split("\t")
+        if len(fields) >= 4 and fields[0] == "s" and fields[1] == sid:
+            fields[2] = new_name
+            fields[3] = new_display
+            result.append("\t".join(fields))
+        else:
+            result.append(line)
+    return result
+
+
 def _format_session_display(
     sess_path: Path,
     name: str,
