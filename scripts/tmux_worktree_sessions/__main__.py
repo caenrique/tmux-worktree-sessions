@@ -521,8 +521,6 @@ def _manage_loop(tmpfile: Path, *, cfg: Config) -> int:
                     "--ansi",
                     "--with-nth",
                     "4",
-                    "--nth",
-                    "3",
                     "--tiebreak=index",
                     "--delimiter",
                     "\t",
@@ -535,8 +533,16 @@ def _manage_loop(tmpfile: Path, *, cfg: Config) -> int:
                         "enter:open ctrl-bs:back ?:preview ctrl-x:delete-session "
                         "ctrl-r:rename ctrl-w:worktree ctrl-d:remove-worktree"
                     ),
+                    # No `--nth` here: fzf indexes `--nth` into the
+                    # post-`--with-nth` view, so any value finds nothing once
+                    # `--with-nth 4` collapses each row to a single field. We
+                    # rely on `--ansi` stripping SGR codes from field 4 before
+                    # matching.
+                    # Preview target is `'$'{2}`, not `'\$'{2}`: inside single
+                    # quotes the backslash survives literally, and tmux rejects
+                    # `\$<sid>` with "can't find pane".
                     "--preview",
-                    ("[ '{1}' = s ] && tmux capture-pane -e -p -t '\\$'{2} 2>/dev/null || ls '{2}' 2>/dev/null"),
+                    ("[ '{1}' = s ] && tmux capture-pane -e -p -t '$'{2} 2>/dev/null || ls '{2}' 2>/dev/null"),
                     "--preview-window",
                     "down:50%:border-top:nofollow:hidden",
                     "--bind",

@@ -673,8 +673,14 @@ def test_cli_manage_invokes_fzf_with_popup_args(
     flat = [token for inv in invocations for token in inv]
     assert "--tmux" in flat
     assert "Sessions > " in flat
-    # fzf must search the clean column (3) and display the decorated column (4)
-    # so session rows aren't penalised for the "(current)/(previous)" suffix
-    # under --scheme=path.
+    # `--with-nth 4` shows the decorated column. We deliberately do NOT pair it
+    # with `--nth`: fzf indexes `--nth` into the post-`--with-nth` view, so
+    # `--nth 3` matches zero rows once the view collapses to a single field.
     assert "--with-nth" in flat and flat[flat.index("--with-nth") + 1] == "4"
-    assert "--nth" in flat and flat[flat.index("--nth") + 1] == "3"
+    assert "--nth" not in flat
+    # Preview must use single-quoted `'$'` (not `'\$'`) so the shell passes
+    # `$<sid>` through to tmux. With backslash escaping, tmux rejects
+    # `\$<sid>` with "can't find pane".
+    preview_idx = flat.index("--preview")
+    assert "'$'{2}" in flat[preview_idx + 1]
+    assert "'\\$'" not in flat[preview_idx + 1]
