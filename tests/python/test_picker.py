@@ -1,9 +1,11 @@
 """Pure-layer tests for :mod:`tmux_sessions.picker`.
 
 Mirrors the bats coverage in ``tests/common.bats`` for
-``_gen_branch_picker_entries``. Uses the ``make_repo`` fixture so the
-underlying ``git.list_branches`` / ``git.resolve_remote`` calls run
-against real tmpdir repos.
+``_gen_branch_picker_entries`` and ``pick_branch``. Uses the
+``make_repo`` fixture so the underlying ``git.list_branches`` /
+``git.resolve_remote`` calls run against real tmpdir repos, and the
+``fzf_stub`` fixture so ``pick_branch`` drives the same scripted fzf
+binary the bats suite uses.
 """
 
 from __future__ import annotations
@@ -12,7 +14,14 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from tmux_sessions.picker import IconSet, gen_branch_picker_entries
+from tmux_sessions.picker import (
+    BranchChoice,
+    IconSet,
+    gen_branch_picker_entries,
+    pick_branch,
+)
+
+from .conftest import FzfStub
 
 
 def test_iconset_sep_is_space_when_icons_present() -> None:
@@ -89,3 +98,79 @@ def test_gen_branch_picker_entries_none_style_emits_no_separator(
     lines = list(gen_branch_picker_entries(repo, icons=icons))
     assert lines[0] == "[new]\tnew branch"
     assert any(line == "main\tmain" for line in lines)
+
+
+# ── pick_branch ──────────────────────────────────────────────────────────────
+
+
+def _make_fresh_fetch_head(repo: Path) -> None:
+    """Touch FETCH_HEAD so ``fetch_is_stale`` returns False in tests."""
+    common_dir = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--git-common-dir"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    common = Path(common_dir)
+    if not common.is_absolute():
+        common = repo / common
+    (common / "FETCH_HEAD").touch()
+
+
+def _pick_branch_args(repo: Path) -> dict[str, object]:
+    return {
+        "icons": IconSet.from_style("ascii"),
+        "fetch_reload_script": Path("/bin/true"),
+        "listen_port": 12345,
+        "now": 0.0,
+        "fetch_window_secs": 900,
+    }
+
+
+def test_pick_branch_ctrl_bs_returns_back(
+    make_repo: Callable[..., Path],
+    fzf_stub: FzfStub,
+) -> None:
+    repo = make_repo("r", with_remote=True)
+    _make_fresh_fetch_head(repo)
+    fzf_stub.respond("ctrl-bs\n")
+    result = pick_branch(repo, **_pick_branch_args(repo))  # type: ignore[arg-type]
+    assert result == BranchChoice(kind="back")
+
+
+def test_pick_branch_esc_returns_cancel(
+    make_repo: Callable[..., Path],
+    fzf_stub: FzfStub,
+) -> None:
+    repo = make_repo("r", with_remote=True)
+    _make_fresh_fetch_head(repo)
+    fzf_stub.esc()
+    result = pick_branch(repo, **_pick_branch_args(repo))  # type: ignore[arg-type]
+    assert result == BranchChoice(kind="cancel")
+
+
+def test_pick_branch_existing_branch_returns_existing(
+    make_repo: Callable[..., Path],
+    fzf_stub: FzfStub,
+) -> None:
+    repo = make_repo("r", branches=("main", "feature"), with_remote=True)
+    _make_fresh_fetch_head(repo)
+    fzf_stub.respond("\nfeature\t- feature")
+    result = pick_branch(repo, **_pick_branch_args(repo))  # type: ignore[arg-type]
+    assert result == BranchChoice(kind="existing", name="feature")
+
+
+def test_pick_branch_new_then_name_returns_new(
+    make_repo: Callable[..., Path],
+    fzf_stub: FzfStub,
+) -> None:
+    repo = make_repo("r", with_remote=True)
+    _make_fresh_fetch_head(repo)
+    # First fzf call: pick "[new]". Empty key (Enter) followed by the
+    # selected line (cut -f1 → "[new]").
+    fzf_stub.respond("\n[new]\t+ new branch")
+    # Second fzf call: --print-query --expect "ctrl-bs". Line 1 = query,
+    # line 2 = the expect-key (empty here = Enter).
+    fzf_stub.respond("shiny")
+    result = pick_branch(repo, **_pick_branch_args(repo))  # type: ignore[arg-type]
+    assert result == BranchChoice(kind="new", name="shiny")

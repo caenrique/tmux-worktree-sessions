@@ -273,7 +273,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
   from env, builds the `IconSet`, calls the pure function.
 - Replace bash. Pytest parity.
 
-### Step 17 — `pick_branch` `[ ]`
+### Step 17 — `pick_branch` `[x]`
 
 - Pure: `picker.pick_branch(repo: Path, *, icons: IconSet) ->
   BranchChoice` — spawns fzf via `subprocess.Popen` with the same

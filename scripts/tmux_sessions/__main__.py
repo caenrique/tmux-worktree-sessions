@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import secrets
 import subprocess
 import sys
 import time
@@ -183,6 +184,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     branch_entries_p.add_argument("repo", help="path to the git repo")
     branch_entries_p.set_defaults(handler=cmd_picker_branch_entries)
+
+    pick_branch_p = picker_sub.add_parser(
+        "pick-branch",
+        help="run the interactive fzf branch picker; print 'new:<name>' or 'existing:<branch>'",
+    )
+    pick_branch_p.add_argument("repo", help="path to the git repo")
+    pick_branch_p.add_argument(
+        "fetch_reload_script",
+        help="path to fetch_reload.sh (delegates background fetch+reload)",
+    )
+    pick_branch_p.set_defaults(handler=cmd_picker_pick_branch)
 
     return parser
 
@@ -375,6 +387,26 @@ def cmd_picker_branch_entries(args: argparse.Namespace) -> int:
     for line in picker.gen_branch_picker_entries(Path(args.repo), icons=icons):
         sys.stdout.write(line)
         sys.stdout.write("\n")
+    return 0
+
+
+def cmd_picker_pick_branch(args: argparse.Namespace) -> int:
+    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
+    icons = picker.IconSet.from_style(style)
+    # Random ephemeral port for fzf --listen, mirroring the bash range.
+    listen_port = 51200 + secrets.randbelow(14336)
+    choice = picker.pick_branch(
+        Path(args.repo),
+        icons=icons,
+        fetch_reload_script=Path(args.fetch_reload_script),
+        listen_port=listen_port,
+        now=time.time(),
+    )
+    if choice.kind == "back":
+        return 1
+    if choice.kind == "cancel":
+        return 2
+    sys.stdout.write(f"{choice.kind}:{choice.name}\n")
     return 0
 
 

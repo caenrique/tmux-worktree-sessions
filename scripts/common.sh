@@ -6,6 +6,7 @@
 # Shared fzf style flags (no --tmux; used for inline prompts inside execute).
 FZF_INLINE="--reverse --no-scrollbar --no-info --no-separator --no-border --color header:#6c7086"
 # Full-height tmux popup with the same chrome.
+# shellcheck disable=SC2034  # consumed by sessions.sh after sourcing common.sh
 FZF_POPUP="--tmux bottom,100%,100% --scheme=path $FZF_INLINE"
 
 # Icons used across picker lists (TMUX_SESSIONS_ICON_STYLE: nerd|emoji|ascii; default: nerd).
@@ -230,71 +231,7 @@ _fetch_is_stale() { _tmux_sessions_py git fetch-is-stale "$1"; }
 # Interactively pick a branch for a new worktree.
 # Returns "new:<name>" or "existing:<branch>" on stdout with exit 0.
 # Exit 1 = ctrl-bs (go back), exit 2 = Esc (close all).
-#
-# Opens fzf with --listen so a background process can push a reload after
-# git fetch --all completes.  Auto-fetches only when FETCH_HEAD is stale
-# (>15 min); ctrl-f triggers a manual refresh at any time.
 pick_branch() {
-  local repo_path="$1"
-  local _port _tmpfile _refresh_script _fetch_pid=""
-  _port=$(( 51200 + RANDOM % 14335 ))
-  _tmpfile=$(mktemp)
-  _refresh_script="$(dirname "${BASH_SOURCE[0]}")/fetch_reload.sh"
-  local _HEADER_BASE="enter:checkout  ctrl-bs:back  ctrl-f:refresh"
-
-  trap 'rm -f "$_tmpfile"; [[ -n "$_fetch_pid" ]] && kill "$_fetch_pid" 2>/dev/null' RETURN
-
-  _gen_branch_picker_entries "$repo_path" > "$_tmpfile"
-
-  local _initial_header="$_HEADER_BASE"
-  if _fetch_is_stale "$repo_path"; then
-    "$_refresh_script" "$repo_path" "$_tmpfile" "$_port" "$_HEADER_BASE" &
-    _fetch_pid=$!
-    _initial_header="$_HEADER_BASE [syncing...]"
-  fi
-
-  while true; do
-    local selected rc
-    selected=$(
-      cat "$_tmpfile" | fzf $FZF_POPUP \
-          --listen "$_port" \
-          --with-nth 2 \
-          --delimiter $'\t' \
-          --prompt "Branch > " \
-          --header "$_initial_header" \
-          --expect "ctrl-bs" \
-          --bind "ctrl-f:change-header($_HEADER_BASE ⟳ fetching...)+execute-silent('$_refresh_script' '$repo_path' '$_tmpfile' '$_port' '$_HEADER_BASE')"
-    )
-    rc=$?
-    _initial_header="$_HEADER_BASE"
-
-    [[ $rc -eq 130 ]] && return 2
-    [[ -z "$selected" ]] && return 2
-
-    local key item
-    key=$(printf '%s' "$selected" | head -1)
-    item=$(printf '%s' "$selected" | sed -n '2p' | cut -f1)
-    [[ "$key" == "ctrl-bs" ]] && return 1
-    [[ -z "$item" ]] && return 2
-
-    if [[ "$item" == "[new]" ]]; then
-      local name_output name_rc name_key new_name
-      name_output=$(echo "" | fzf $FZF_POPUP \
-        --print-query --no-select-1 \
-        --prompt "New branch name: " \
-        --header "enter:create  ctrl-bs:back" \
-        --expect "ctrl-bs")
-      name_rc=$?
-      [[ $name_rc -eq 130 ]] && return 2
-      name_key=$(printf '%s' "$name_output" | sed -n '2p')
-      [[ "$name_key" == "ctrl-bs" ]] && continue
-      new_name=$(sanitize_name "$(printf '%s' "$name_output" | head -1)")
-      [[ -z "$new_name" ]] && continue
-      echo "new:${new_name}"
-      return 0
-    else
-      echo "existing:${item}"
-      return 0
-    fi
-  done
+  TMUX_SESSIONS_ICON_STYLE="$_ICON_STYLE" \
+    _tmux_sessions_py picker pick-branch "$1" "$_PLUGIN_SCRIPTS_DIR/fetch_reload.sh"
 }
