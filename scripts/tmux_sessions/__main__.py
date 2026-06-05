@@ -14,10 +14,13 @@ shard into ``cli/<group>.py`` only if this module ever gets unwieldy.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import secrets
+import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -250,6 +253,20 @@ def build_parser() -> argparse.ArgumentParser:
     ctrl_d_p.add_argument("id", help="session id (without leading $) or project path")
     ctrl_d_p.add_argument("tmpfile", help="picker entries tmpfile to mutate in place")
     ctrl_d_p.set_defaults(handler=cmd_sessions_action_ctrl_d)
+
+    manage_p = sessions_sub.add_parser(
+        "manage",
+        help="run the session-picker fzf loop (top-level entry point)",
+    )
+    manage_p.set_defaults(handler=cmd_sessions_manage)
+
+    display_name_p = sessions_sub.add_parser(
+        "display-name",
+        help="round-trip a session name through format-session-name (status-bar helper)",
+    )
+    display_name_p.add_argument("path", help="session working directory")
+    display_name_p.add_argument("name", help="session name as stored by tmux (dots → underscores)")
+    display_name_p.set_defaults(handler=cmd_sessions_display_name)
 
     fetch_reload_p = sub.add_parser(
         "fetch-reload",
@@ -838,6 +855,333 @@ def cmd_sessions_action_ctrl_d(args: argparse.Namespace) -> int:
         return 0
 
     return 0
+
+
+def cmd_sessions_display_name(args: argparse.Namespace) -> int:
+    """Round-trip ``args.name`` through ``format-session-name``.
+
+    tmux replaces dots with underscores when storing session names. The
+    status bar uses this command to recover the original (dotted) form
+    when it round-trips, falling back to the stored name when the user
+    renamed the session by hand.
+    """
+    home = os.environ.get("HOME", "")
+    strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
+    derived = text.format_session_name(args.path, home=home, strip_prefixes=strip_prefixes)
+    sys.stdout.write(derived if derived.replace(".", "_") == args.name else args.name)
+    return 0
+
+
+def _read_lines(path: Path) -> list[str]:
+    return path.read_text().splitlines() if path.exists() else []
+
+
+def _container_for_repo(repo_path: str) -> str:
+    """Return the directory holding sibling worktrees for ``repo_path``.
+
+    Mirrors the bash one-liner ``git worktree list --porcelain | awk
+    '/^worktree /{print $2; exit}' | xargs dirname``: the first
+    ``worktree`` line points at the main checkout, whose parent is the
+    container shared with linked worktrees.
+    """
+    result = subprocess.run(
+        ["git", "-C", repo_path, "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return ""
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            return str(Path(line[len("worktree ") :]).parent)
+    return ""
+
+
+def _prompt_new_session_name() -> str:
+    """Drive the inline fzf prompt for the new-session sentinel.
+
+    Returns the sanitised name, or ``""`` when the user cancels (Esc,
+    ctrl-bs, or empty input). Mirrors the bash ``echo "" | fzf $FZF_POPUP
+    --print-query --no-select-1 --prompt 'Session name: '`` invocation.
+    """
+    result = subprocess.run(
+        [
+            "fzf",
+            *picker.FZF_POPUP_FLAGS,
+            "--print-query",
+            "--no-select-1",
+            "--prompt",
+            "Session name: ",
+            "--header",
+            "enter:create  ctrl-bs:cancel",
+            "--expect",
+            "ctrl-bs",
+        ],
+        input="",
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 130:
+        return ""
+    out_lines = result.stdout.split("\n")
+    query = out_lines[0] if out_lines else ""
+    key = out_lines[1] if len(out_lines) > 1 else ""
+    if key == "ctrl-bs":
+        return ""
+    return text.sanitize_name(query)
+
+
+def _bump_score_and_switch(name: str, session_path: Path) -> None:
+    """Bump the recency score for ``name`` and switch to (or create) the session.
+
+    Resolves env knobs the same way ``cmd_score_update`` and
+    ``cmd_tmux_switch_or_create`` do so the behaviour is identical to
+    the ``update_score`` + ``switch_or_create_session`` pair the bash
+    main loop ran in sequence.
+    """
+    score_file = Path(os.environ.get("SCORE_FILE", ""))
+    half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
+    half_life_secs = half_life_days * 24 * 3600
+    now = float(int(time.time()))
+
+    if score_file:
+        score_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            text_in = score_file.read_text()
+        except FileNotFoundError:
+            text_in = ""
+        entries = score.parse_score_table(text_in)
+        new_entries = score.merge_score(entries, name=name, now=now, half_life_secs=half_life_secs)
+        tmp = score_file.with_name(score_file.name + ".tmp")
+        tmp.write_text(score.format_score_table(new_entries))
+        tmp.replace(score_file)
+
+    tmux.switch_or_create(session_path, name)
+
+
+def _resolve_score_file_env() -> str:
+    """Match the bash ``SCORE_FILE`` derivation in ``common.sh``.
+
+    The bash side falls back to ``TMUX_SESSIONS_SCORES_FILE`` then to
+    ``$HOME/.local/share/tmux-sessions/scores.tsv``. The Python
+    sub-handlers expect ``SCORE_FILE`` to be set in the env they
+    inherit, so we resolve and re-export it here.
+    """
+    explicit = os.environ.get("SCORE_FILE")
+    if explicit:
+        return explicit
+    configured = os.environ.get("TMUX_SESSIONS_SCORES_FILE")
+    if configured:
+        return configured
+    home = os.environ.get("HOME", "")
+    return f"{home}/.local/share/tmux-sessions/scores.tsv"
+
+
+def cmd_sessions_manage(args: argparse.Namespace) -> int:
+    """Run the top-level session picker fzf loop.
+
+    Mirrors the bash ``manage_sessions`` function in ``sessions.sh``:
+    seed a tmpfile via ``build_entries``, drive fzf with the same flags
+    and bindings (binds invoke ``python3 -m tmux_sessions sessions
+    action ...`` instead of the legacy ``$self --action ...`` shim), and
+    dispatch on the chosen key. Returns 0 once the loop exits.
+    """
+    score_file = _resolve_score_file_env()
+    os.environ["SCORE_FILE"] = score_file
+
+    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
+    icons = picker.IconSet.from_style(style)
+
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".entries") as initial:
+        tmpfile = Path(initial.name)
+        config = _resolve_build_entries_config()
+        for line in sessions.build_entries(icons=icons, **config):  # type: ignore[arg-type]
+            initial.write(line + "\n")
+
+    try:
+        return _manage_loop(tmpfile, icons=icons)
+    finally:
+        for path in (tmpfile, tmpfile.with_name(tmpfile.name + ".new")):
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
+
+
+def _manage_loop(tmpfile: Path, *, icons: picker.IconSet) -> int:
+    # Action binds re-invoke the dispatcher itself; using
+    # ``sys.executable`` keeps the venv's interpreter active in the
+    # subshell fzf spawns. The inline {1}/{2}/{n} placeholders are
+    # interpolated by fzf at runtime; the rest of the command line is
+    # escaped so paths with spaces survive fzf's shell-style execute().
+    action_cmd_prefix = f"{shlex.quote(sys.executable)} -m tmux_sessions sessions action "
+    quoted_tmpfile = shlex.quote(str(tmpfile))
+    bind_ctrl_d = (
+        f"ctrl-d:execute({action_cmd_prefix}ctrl-d {{1}} {{2}} {quoted_tmpfile})"
+        f"+reload(cat {quoted_tmpfile})+pos({{n}})"
+    )
+    bind_ctrl_x = (
+        f"ctrl-x:execute-silent({action_cmd_prefix}ctrl-x {{1}} {{2}} {quoted_tmpfile})"
+        f"+reload(cat {quoted_tmpfile})+pos({{n}})"
+    )
+    bind_ctrl_r = (
+        f"ctrl-r:execute({action_cmd_prefix}ctrl-r {{1}} {{2}} {quoted_tmpfile})"
+        f"+reload(cat {quoted_tmpfile})+pos({{n}})"
+    )
+
+    while True:
+        with tmpfile.open("rb") as input_f:
+            result = subprocess.run(
+                [
+                    "fzf",
+                    *picker.FZF_POPUP_FLAGS,
+                    "--ansi",
+                    "--with-nth",
+                    "4",
+                    "--nth",
+                    "3",
+                    "--tiebreak=index",
+                    "--delimiter",
+                    "\t",
+                    "--prompt",
+                    "Sessions > ",
+                    "--expect",
+                    "ctrl-w,ctrl-bs",
+                    "--header",
+                    (
+                        "enter:open ctrl-bs:back ?:preview ctrl-x:delete-session "
+                        "ctrl-r:rename ctrl-w:worktree ctrl-d:remove-worktree"
+                    ),
+                    "--preview",
+                    ("[ '{1}' = s ] && tmux capture-pane -e -p -t '\\$'{2} 2>/dev/null || ls '{2}' 2>/dev/null"),
+                    "--preview-window",
+                    "down:50%:border-top:nofollow:hidden",
+                    "--bind",
+                    "?:toggle-preview",
+                    "--bind",
+                    bind_ctrl_d,
+                    "--bind",
+                    bind_ctrl_x,
+                    "--bind",
+                    bind_ctrl_r,
+                ],
+                stdin=input_f,
+                capture_output=True,
+                text=True,
+            )
+
+        if result.returncode == 130:
+            return 0
+        if not result.stdout:
+            return 0
+
+        out_lines = result.stdout.split("\n")
+        key = out_lines[0] if out_lines else ""
+        line = out_lines[1] if len(out_lines) > 1 else ""
+
+        if key == "ctrl-bs":
+            return 0
+
+        fields = line.split("\t")
+        row_type = fields[0] if fields else ""
+        key2 = fields[1] if len(fields) > 1 else ""
+        search = fields[2] if len(fields) > 2 else ""
+
+        if key == "ctrl-w":
+            if _handle_ctrl_w(row_type=row_type, key2=key2, icons=icons):
+                return 0
+            continue
+
+        if row_type == "n":
+            new_name = _prompt_new_session_name()
+            if not new_name:
+                continue
+            home = os.environ.get("HOME", "")
+            _bump_score_and_switch(new_name, Path(home))
+            return 0
+
+        if row_type == "p":
+            _bump_score_and_switch(search, Path(key2))
+            return 0
+
+        if row_type == "s":
+            subprocess.run(["tmux", "switch-client", "-t", f"${key2}"], capture_output=True)
+            return 0
+
+
+def _handle_ctrl_w(*, row_type: str, key2: str, icons: picker.IconSet) -> bool:
+    """Drive the ctrl-w (create-worktree) flow; return True to exit the loop.
+
+    Returns False to continue the picker loop (Esc-to-back from the
+    branch picker, or no repo resolved). Returns True after a successful
+    worktree creation + session switch so the parent loop can exit 0.
+    """
+    if row_type == "p":
+        repo_path = _git_toplevel(key2)
+    elif row_type == "s":
+        sess_path_result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", f"${key2}", "#{session_path}"],
+            capture_output=True,
+            text=True,
+        )
+        sess_path = sess_path_result.stdout.strip()
+        repo_path = _git_toplevel(sess_path) if sess_path else ""
+    else:
+        return False
+
+    if not repo_path:
+        return False
+
+    container = _container_for_repo(repo_path)
+    if not container:
+        return False
+
+    plugin_dir = os.environ.get("TMUX_PLUGIN_DIR")
+    if plugin_dir:
+        fetch_reload_script = Path(plugin_dir) / "scripts" / "fetch_reload.sh"
+    else:
+        fetch_reload_script = Path(__file__).resolve().parent.parent / "fetch_reload.sh"
+
+    listen_port = 51200 + secrets.randbelow(14336)
+    choice = picker.pick_branch(
+        Path(repo_path),
+        icons=icons,
+        fetch_reload_script=fetch_reload_script,
+        listen_port=listen_port,
+        now=time.time(),
+    )
+    if choice.kind == "cancel":
+        # Bash treats Esc here as "close all" — return True so the
+        # caller exits 0 instead of redrawing the parent picker.
+        return True
+    if choice.kind == "back":
+        return False
+
+    fallback = os.environ.get("TMUX_SESSIONS_DEFAULT_BRANCH") or "main"
+    try:
+        if choice.kind == "new":
+            wt_path = git.add_worktree(
+                Path(repo_path),
+                Path(container),
+                branch=None,
+                new_name=choice.name,
+                default_branch_fallback=fallback,
+            )
+        else:  # "existing"
+            wt_path = git.add_worktree(
+                Path(repo_path),
+                Path(container),
+                branch=choice.name,
+                new_name=None,
+                default_branch_fallback=fallback,
+            )
+    except RuntimeError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return False
+
+    home = os.environ.get("HOME", "")
+    strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
+    name = text.format_session_name(str(wt_path), home=home, strip_prefixes=strip_prefixes)
+    _bump_score_and_switch(name, wt_path)
+    return True
 
 
 def cmd_text_format_session_name(args: argparse.Namespace) -> int:

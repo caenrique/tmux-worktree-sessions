@@ -332,14 +332,19 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
 - CLI: `cmd_sessions_build_entries` (passthrough).
 - Replace bash. Pytest parity.
 
-### Step 22 — `manage_sessions` `[ ]`
+### Step 22 — `manage_sessions` `[x]`
 
 - Pure: `sessions.manage_sessions(...)` — the main fzf loop. Largest
   single step; dispatches on the chosen key and calls into the
   migrated helpers.
 - CLI: `cmd_sessions_manage` is a one-line passthrough.
-- After this step, `scripts/sessions.sh` is reduced to a one-line
-  shim: `exec python3 -m tmux_sessions sessions manage`.
+- The bash function shims (`list_projects`, `build_entries`,
+  `_is_orphaned_worktree_dir`, `_action_*`) stay in `sessions.sh` as
+  thin Python passthroughs because the bats suite sources the file and
+  calls them by name; they are deleted in Step 24 along with the
+  bats suite. The `manage_sessions` body and the `--display-name`
+  entry-point now exec into `_tmux_sessions_py sessions manage` /
+  `_tmux_sessions_py sessions display-name`.
 
 ---
 

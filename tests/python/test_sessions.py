@@ -643,3 +643,67 @@ def test_cli_action_ctrl_d_non_orphan_non_worktree_displays_message(
     assert any(
         inv[:2] == ["tmux", "display-message"] and "ctrl-d: not a linked worktree" in inv for inv in invocations
     ), invocations
+
+
+def test_cli_display_name_returns_derived_when_normalises(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("TMUX_SESSIONS_STRIP_PREFIXES", "")
+    stdout = io.StringIO()
+    monkeypatch.setattr("sys.stdout", stdout)
+
+    rc = main(["sessions", "display-name", f"{tmp_path}/with.dot", "~/with_dot"])
+    assert rc == 0
+    assert stdout.getvalue() == "~/with.dot"
+
+
+def test_cli_display_name_falls_back_to_raw_on_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("TMUX_SESSIONS_STRIP_PREFIXES", "")
+    stdout = io.StringIO()
+    monkeypatch.setattr("sys.stdout", stdout)
+
+    rc = main(["sessions", "display-name", f"{tmp_path}/foo", "manual_name"])
+    assert rc == 0
+    assert stdout.getvalue() == "manual_name"
+
+
+def test_cli_manage_invokes_fzf_with_popup_args(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+    fzf_stub: object,
+) -> None:
+    """Mirror bats: default invocation calls fzf with popup args; stub Esc → exit 0."""
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("TMUX_SESSIONS_PROJECTS_DIRS", str(projects_dir))
+    monkeypatch.setenv("TMUX_SESSIONS_MAX_DEPTH", "4")
+    monkeypatch.setenv("TMUX_SESSIONS_STRIP_PREFIXES", "")
+    monkeypatch.setenv("TMUX_SESSIONS_MANUAL_SESSIONS", "")
+    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    monkeypatch.setenv("TMUX_SESSIONS_SCORE_HALF_LIFE", "14")
+    monkeypatch.setenv("TMUX_SESSIONS_SCORE_PATH_BOOST", "1.0")
+    monkeypatch.setenv("SCORE_FILE", str(tmp_path / "scores.tsv"))
+    tmux_stub(sessions="")
+    fzf_stub.esc()  # type: ignore[attr-defined]
+
+    rc = main(["sessions", "manage"])
+    assert rc == 0
+
+    invocations = fzf_stub.invocations()  # type: ignore[attr-defined]
+    assert invocations, "fzf was not invoked"
+    flat = [token for inv in invocations for token in inv]
+    assert "--tmux" in flat
+    assert "Sessions > " in flat
+    # fzf must search the clean column (3) and display the decorated column (4)
+    # so session rows aren't penalised for the "(current)/(previous)" suffix
+    # under --scheme=path.
+    assert "--with-nth" in flat and flat[flat.index("--with-nth") + 1] == "4"
+    assert "--nth" in flat and flat[flat.index("--nth") + 1] == "3"
