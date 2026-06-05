@@ -1,11 +1,9 @@
 """Pure-layer tests for :mod:`tmux_sessions.picker`.
 
-Mirrors the bats coverage in ``tests/common.bats`` for
-``_gen_branch_picker_entries`` and ``pick_branch``. Uses the
-``make_repo`` fixture so the underlying ``git.list_branches`` /
-``git.resolve_remote`` calls run against real tmpdir repos, and the
-``fzf_stub`` fixture so ``pick_branch`` drives the same scripted fzf
-binary the bats suite uses.
+Uses the ``make_repo`` fixture so the underlying ``git.list_branches``
+and ``git.resolve_remote`` calls run against real tmpdir repos, and
+the ``fzf_stub`` fixture so ``pick_branch`` drives a scripted ``fzf``
+binary on PATH.
 """
 
 from __future__ import annotations

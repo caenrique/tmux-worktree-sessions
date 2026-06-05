@@ -1,4 +1,4 @@
-"""Pure-layer tests mirroring the bats `strip_ansi` cases."""
+"""Pure-layer tests for :mod:`tmux_sessions.text`."""
 
 from __future__ import annotations
 

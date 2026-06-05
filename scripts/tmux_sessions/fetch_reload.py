@@ -6,14 +6,13 @@ fzf's listen port; once the fetch completes, regenerates the picker
 entries file and posts a final ``change-header(...)+reload(cat ...)``
 so fzf swaps in the fresh list.
 
-Subprocess calls (``git``, ``curl``) make this a pure-layer module per
-the migration rules: every input is an explicit parameter, no ``os.environ``
-or ``time.time()`` reads. Fork/detach lives in the CLI handler.
+Every input is an explicit parameter — no ``os.environ`` or
+``time.time()`` reads. Fork/detach lives in the CLI handler.
 
 Why curl, not ``urllib.request``: ``curl`` is already a documented
-runtime dep of the plugin, the existing bats curl stub gives us
-end-to-end coverage of the POST payloads for free, and using it here
-keeps the bats and pytest suites verifying identical wire output.
+runtime dep of the plugin and the test stub captures every POST
+verbatim, so the wire output is exercised end-to-end without any
+HTTP-level mocking.
 """
 
 from __future__ import annotations
@@ -33,9 +32,8 @@ _SPIN_INTERVAL_S: float = 0.12
 def _curl_post(port: int, body: str, *, max_time: float) -> None:
     """POST ``body`` to fzf's ``--listen`` port, swallowing all errors.
 
-    Mirrors the bash ``curl -s --max-time T -XPOST localhost:P -d BODY``
-    invocation. Failures are intentionally silent so a missed spinner
-    frame or a torn-down listener never bubbles up to the picker.
+    Failures are intentionally silent so a missed spinner frame or a
+    torn-down listener never bubbles up to the picker.
     """
     subprocess.run(
         [
@@ -56,10 +54,10 @@ def _curl_post(port: int, body: str, *, max_time: float) -> None:
 def _spinner_loop(stop: threading.Event, *, port: int, header_base: str) -> None:
     """Post a rotating spinner frame until ``stop`` is set.
 
-    The initial 0.3s delay matches bash so fzf has time to bind its
-    listener before the first POST. ``stop.wait`` returns ``True`` when
-    the event fires, which we use as both an abort signal and the
-    inter-frame sleep.
+    The initial 0.3s delay gives fzf time to bind its listener before
+    the first POST. ``stop.wait`` returns ``True`` when the event
+    fires, which we use as both an abort signal and the inter-frame
+    sleep.
     """
     if stop.wait(_SPIN_INITIAL_DELAY_S):
         return

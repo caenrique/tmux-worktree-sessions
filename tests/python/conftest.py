@@ -1,9 +1,10 @@
 """Shared pytest fixtures for the tmux_sessions Python tests.
 
-``make_repo`` mirrors the bats ``mkrepo`` helper in
-``tests/helpers/git_fixtures.bash``: it spins up a real git repo (with
-optional sibling bare ``origin``) under a tmpdir so subprocess-based
-helpers in :mod:`tmux_sessions.git` can be exercised end-to-end.
+``make_repo`` spins up a real git repo (with optional sibling bare
+``origin``) under a tmpdir so subprocess-based helpers in
+:mod:`tmux_sessions.git` can be exercised end-to-end. ``tmux_stub``,
+``fzf_stub``, and ``curl_stub`` prepend programmable scripts in
+``_stubs/`` onto PATH so subprocess calls land on canned responses.
 """
 
 from __future__ import annotations
@@ -33,10 +34,9 @@ def _git(repo: Path, *args: str) -> None:
 def make_repo(tmp_path: Path) -> Callable[..., Path]:
     """Return a factory that creates a real git repo under ``tmp_path``.
 
-    Defaults match ``mkrepo`` in ``tests/helpers/git_fixtures.bash``: a
-    ``main`` branch with one initial commit. Pass ``with_remote=True``
-    to also create a sibling bare ``origin`` and run
-    ``git remote set-head origin main``.
+    Default is a ``main`` branch with one initial commit. Pass
+    ``with_remote=True`` to also create a sibling bare ``origin`` and
+    run ``git remote set-head origin main``.
     """
 
     def _factory(
@@ -94,7 +94,7 @@ class TmuxStub:
 
 @pytest.fixture
 def tmux_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., TmuxStub]:
-    """Prepend the bats tmux stub to PATH and prime its env-driven state."""
+    """Prepend the tmux stub to PATH and prime its env-driven state."""
 
     def _factory(
         *,
@@ -113,7 +113,7 @@ def tmux_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., 
 
 @dataclass
 class FzfStub:
-    """Handle to the bats fzf stub primed via env for one test."""
+    """Handle to the fzf stub primed via env for one test."""
 
     queue: Path
     exit_queue: Path
@@ -143,7 +143,7 @@ class FzfStub:
 
 @dataclass
 class CurlStub:
-    """Handle to the bats curl stub primed via env for one test."""
+    """Handle to the curl stub primed via env for one test."""
 
     log: Path
 
@@ -160,7 +160,7 @@ class CurlStub:
 
 @pytest.fixture
 def curl_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CurlStub:
-    """Prepend the bats curl stub to PATH and seed an empty log."""
+    """Prepend the curl stub to PATH and seed an empty log."""
     log = tmp_path / "curl.log"
     log.write_text("")
     monkeypatch.setenv("PATH", f"{_TMUX_STUB_DIR}:{os.environ['PATH']}")
@@ -170,7 +170,7 @@ def curl_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CurlStub:
 
 @pytest.fixture
 def fzf_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FzfStub:
-    """Prepend the bats fzf stub to PATH and seed empty queues."""
+    """Prepend the fzf stub to PATH and seed empty queues."""
     queue = tmp_path / "fzf.queue"
     exit_queue = tmp_path / "fzf.exit.queue"
     stdin_log = tmp_path / "fzf.stdin.log"

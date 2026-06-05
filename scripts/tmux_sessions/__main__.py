@@ -9,9 +9,10 @@ registered here:
   the ``manage`` loop.
 * ``fetch-reload`` — fzf bind spawned inside ``picker.pick_branch``.
 
-Earlier migration steps registered a much larger surface as parity
-shims; once the bash callers were retired those subcommands had no
-consumer outside the test suite, so they were dropped.
+The ``__main__`` module owns argparse plumbing, env-var resolution
+(via :class:`Config`), file I/O, and subprocess orchestration. The
+domain modules (``sessions``, ``picker``, ``git``, ``tmux``, ``score``,
+``text``, ``fetch_reload``) take all inputs as explicit parameters.
 """
 
 from __future__ import annotations

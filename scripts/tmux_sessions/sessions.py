@@ -13,8 +13,7 @@ from . import git, score, text, tmux
 from .picker import IconSet
 
 # Catppuccin Mocha colours used to highlight session rows in
-# build_entries / action rewrites; defined here so the bash shims and
-# Python emitters agree byte-for-byte.
+# build_entries and the ctrl-r session-rename action.
 GREEN = "\033[38;2;166;227;161m"
 YELLOW = "\033[38;2;249;226;175m"
 RESET = "\033[0m"
@@ -23,9 +22,8 @@ RESET = "\033[0m"
 def parse_manual_sessions(spec: str, *, home: str) -> list[tuple[str, Path]]:
     """Parse ``TMUX_SESSIONS_MANUAL_SESSIONS`` into ``(name, path)`` pairs.
 
-    ``spec`` is whitespace-separated ``name:path`` tokens. A leading ``~``
-    in a path is expanded to ``home`` to mirror the bash
-    ``${path/#\\~/$HOME}`` substitution. Tokens without a ``:`` are
+    ``spec`` is whitespace-separated ``name:path`` tokens. A leading
+    ``~`` in a path is expanded to ``home``. Tokens without a ``:`` are
     skipped.
     """
     pairs: list[tuple[str, Path]] = []
@@ -50,9 +48,8 @@ def list_projects(
     """Yield ``(display_name, path)`` for every git project, then manual sessions.
 
     Git projects are discovered via :func:`git.list_git_projects` and
-    rendered through :func:`text.format_session_name` so the bash and
-    Python layers agree on the displayed prefix-stripped name. Manual
-    sessions are appended verbatim after the discovered projects.
+    rendered through :func:`text.format_session_name`. Manual sessions
+    are appended verbatim after the discovered projects.
     """
     for project in git.list_git_projects(roots, max_depth=max_depth):
         name = text.format_session_name(str(project), home=home, strip_prefixes=strip_prefixes)
@@ -71,8 +68,7 @@ def apply_ctrl_x(
 
     The new project row is inserted directly before the ``n`` sentinel
     so the "new session" entry stays at the bottom of the picker; if no
-    sentinel is present, the row is appended to the end. Mirrors the
-    awk state machine in the bash ``_action_ctrl_x`` helper.
+    sentinel is present, the row is appended to the end.
     """
     clean_name = ""
     for line in lines:
@@ -112,11 +108,10 @@ def apply_ctrl_r_session_rename(
 ) -> list[str]:
     """Rewrite the search and display columns of the matching session row.
 
-    Mirrors the awk one-liner in the bash ``_action_ctrl_r`` session
-    branch: when a row's first two columns are ``s`` and ``sid``,
-    overwrite column 3 with ``new_name`` and column 4 with the green-
-    coloured icon+name display so the picker reflects the rename without
-    needing a full ``build_entries`` rebuild.
+    When a row's first two columns are ``s`` and ``sid``, overwrite
+    column 3 with ``new_name`` and column 4 with the green-coloured
+    icon+name display so the picker reflects the rename without needing
+    a full ``build_entries`` rebuild.
     """
     new_display = f"{GREEN}{icons.session}{icons.sep}{new_name}{RESET}"
     result: list[str] = []
@@ -132,11 +127,7 @@ def apply_ctrl_r_session_rename(
 
 
 def remove_session_row(lines: list[str], *, sid: str) -> list[str]:
-    """Drop the ``s<TAB><sid><TAB>...`` rows from a tmpfile snapshot.
-
-    Mirrors the bash ``grep -v $'^s\\t'"$id"$'\\t'`` filter used by
-    ``_action_ctrl_d`` to strip a session entry once it's been killed.
-    """
+    """Drop the ``s<TAB><sid><TAB>...`` rows from a tmpfile snapshot."""
     prefix = f"s\t{sid}\t"
     return [line for line in lines if not line.startswith(prefix)]
 
@@ -144,10 +135,8 @@ def remove_session_row(lines: list[str], *, sid: str) -> list[str]:
 def remove_project_row(lines: list[str], *, path: str) -> list[str]:
     """Drop the ``p<TAB><path><TAB>...`` rows from a tmpfile snapshot.
 
-    Mirrors the bash ``grep -v $'^p\\t'"$wt_path"$'\\t'`` filter used by
-    ``_action_ctrl_d`` after a worktree or orphaned project directory is
-    removed. Path comparison is exact (no glob escaping needed since the
-    column is delimited by tabs).
+    Path comparison is exact — the column is tab-delimited, so no glob
+    escaping is needed.
     """
     prefix = f"p\t{path}\t"
     return [line for line in lines if not line.startswith(prefix)]
@@ -162,9 +151,7 @@ def _format_session_display(
 ) -> str:
     """Pick the display name for a tmux session row.
 
-    Mirrors the bash ``derived=$(format_session_name "$sess_path");
-    [[ "${derived//./_}" != "$name" ]] && derived="$name"`` dance:
-    fall back to the stored session name when the derived form does not
+    Fall back to the stored session name when the derived form does not
     round-trip through tmux's dot→underscore substitution, since that
     means the user renamed the session by hand.
     """

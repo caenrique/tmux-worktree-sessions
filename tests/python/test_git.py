@@ -1,9 +1,8 @@
 """Pure-layer tests for :mod:`tmux_sessions.git`.
 
-Mirrors the bats coverage in ``tests/common.bats`` for ``branch_to_dir``,
-``_resolve_remote``, and ``get_default_branch``. The remote/HEAD cases
-spin up real git repos via the ``make_repo`` fixture in ``conftest.py``
-because ``resolve_remote``/``default_branch`` shell out to real ``git``.
+Cases that exercise the subprocess-backed helpers (``resolve_remote``,
+``default_branch``, ``list_branches``, worktree helpers, …) spin up
+real git repos via the ``make_repo`` fixture in ``conftest.py``.
 """
 
 from __future__ import annotations

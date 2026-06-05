@@ -187,8 +187,8 @@ class Worktree:
     """A git worktree: filesystem path and the branch it has checked out.
 
     ``branch`` is the bare branch name (no ``refs/heads/`` prefix).
-    Detached worktrees use the literal string ``"(detached)"``, matching
-    the bash awk pipeline this dataclass replaced.
+    Detached worktrees use the literal string ``"(detached)"`` so
+    callers can render the column without a special case.
     """
 
     path: Path
@@ -330,9 +330,8 @@ def rename_worktree(
     rename or filesystem move failed) so the CLI can map them to
     ``stderr`` plus exit 1.
 
-    The interactive fzf prompt that picks ``new_name`` lives in bash;
-    this function only owns the post-prompt git/move/repair half of
-    the operation.
+    The interactive fzf rename prompt lives in the CLI dispatcher; this
+    function only owns the post-prompt git/move/repair half.
     """
     show = subprocess.run(
         ["git", "-C", str(wt_path), "branch", "--show-current"],

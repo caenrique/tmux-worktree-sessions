@@ -459,7 +459,7 @@ def test_remove_project_row_drops_matching_path() -> None:
 
 
 def _mkworktree(repo: Path, branch: str, path: Path) -> None:
-    """Create a linked worktree, mirroring ``mkworktree`` in git_fixtures.bash."""
+    """Create a linked worktree at ``path`` checked out on ``branch``."""
     import subprocess as _sp
 
     has_branch = (
@@ -650,7 +650,7 @@ def test_cli_manage_invokes_fzf_with_popup_args(
     tmux_stub: Callable[..., object],
     fzf_stub: object,
 ) -> None:
-    """Mirror bats: default invocation calls fzf with popup args; stub Esc → exit 0."""
+    """Default invocation calls fzf with popup args; stub Esc → exit 0."""
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
     monkeypatch.setenv("HOME", str(tmp_path))

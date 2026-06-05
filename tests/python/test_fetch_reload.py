@@ -1,11 +1,10 @@
 """Pure-layer tests for :mod:`tmux_sessions.fetch_reload`.
 
-Mirrors ``tests/fetch_reload.bats``: the curl stub captures every POST
-so we can assert on the final ``change-header(...)+reload(cat ...)``
-payload, the supplied port, and the surviving reload when ``git fetch``
-fails. Calls run synchronously in the test process — the spinner thread
-exits before posting because tmpdir repos resolve fetch+regen well
-under its 0.3s start delay.
+The curl stub captures every POST so we can assert on the final
+``change-header(...)+reload(cat ...)`` payload, the supplied port, and
+the surviving reload when ``git fetch`` fails. Calls run synchronously
+in the test process — the spinner thread exits before posting because
+tmpdir repos resolve fetch+regen well under its 0.3s start delay.
 """
 
 from __future__ import annotations

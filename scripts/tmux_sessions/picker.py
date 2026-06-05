@@ -18,9 +18,9 @@ from pathlib import Path
 
 from . import git, text
 
-# Shared fzf style flags. Mirror the FZF_INLINE / FZF_POPUP shell
-# variables in scripts/common.sh so behaviour is identical when invoked
-# from Python or from the bash shims.
+# Shared fzf style flags. ``FZF_INLINE_FLAGS`` is the base style used
+# for inline prompts (rename, confirm); ``FZF_POPUP_FLAGS`` adds the
+# ``--tmux`` popup flag and ``--scheme=path`` for top-level pickers.
 FZF_INLINE_FLAGS: tuple[str, ...] = (
     "--reverse",
     "--no-scrollbar",
@@ -46,9 +46,8 @@ class IconSet:
     """Five icons used across picker lists, plus a derived separator.
 
     ``sep`` is a single space when icons are non-empty and empty in
-    ``none`` style — matching the bash ``_ICON_SEP="${_ICON_SESSION:+ }"``
-    derivation so ``f"{icon}{sep}{label}"`` doesn't leave a stray space
-    when the user disabled icons.
+    ``none`` style, so ``f"{icon}{sep}{label}"`` doesn't leave a stray
+    space when the user disabled icons.
     """
 
     session: str
@@ -103,9 +102,9 @@ def gen_branch_picker_entries(repo: Path, *, icons: IconSet) -> Iterator[str]:
 
     First line is the ``[new]`` sentinel, then one line per branch
     returned by :func:`tmux_sessions.git.list_branches`. Branches whose
-    name starts with ``<remote>/`` get the remote icon; the rest get the
-    branch icon. When the repo has no remote, every branch falls through
-    to the local icon (matching the bash behaviour).
+    name starts with ``<remote>/`` get the remote icon; the rest get
+    the branch icon. When the repo has no remote, every branch falls
+    through to the local icon.
     """
     remote = git.resolve_remote(repo)
     yield f"[new]\t{icons.new}{icons.sep}new branch"

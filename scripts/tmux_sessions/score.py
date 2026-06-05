@@ -32,8 +32,7 @@ def parse_score_table(text: str) -> list[tuple[str, float, float]]:
     """Parse score-file text into ``(name, base, ts)`` rows.
 
     Empty input yields ``[]``. Rows that are blank, missing fields, or
-    have non-numeric ``base``/``ts`` are silently skipped — the same
-    forgiving behaviour the awk pipeline had.
+    have non-numeric ``base``/``ts`` are silently skipped.
     """
     rows: list[tuple[str, float, float]] = []
     for line in text.splitlines():
@@ -92,7 +91,7 @@ def merge_score(
 
 
 def _format_number(x: float) -> str:
-    """Match awk's ``print`` formatting: integer-valued floats print as int."""
+    """Format a float so integer-valued numbers print without a decimal."""
     if x == int(x):
         return str(int(x))
     return f"{x:.6g}"
