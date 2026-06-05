@@ -1,9 +1,10 @@
 """Tests for :mod:`tmux_sessions.sessions`.
 
-Pure-layer cases for ``parse_manual_sessions`` and
-``is_orphaned_worktree``; CLI-layer cases that exercise
-``sessions list-projects`` and ``sessions is-orphaned-worktree`` via
-``main(...)`` mirror the corresponding bats coverage.
+Pure-layer cases for ``parse_manual_sessions``,
+``is_orphaned_worktree``, and the action rewrites; CLI-layer cases that
+exercise ``sessions list-projects``, ``sessions is-orphaned-worktree``,
+and ``sessions action ctrl-x`` via ``main(...)`` mirror the
+corresponding bats coverage.
 """
 
 from __future__ import annotations
@@ -14,7 +15,9 @@ from pathlib import Path
 
 import pytest
 from tmux_sessions.__main__ import main
+from tmux_sessions.picker import IconSet
 from tmux_sessions.sessions import (
+    apply_ctrl_x,
     is_orphaned_worktree,
     parse_manual_sessions,
 )
@@ -181,3 +184,79 @@ def test_cli_is_orphaned_worktree_exit_one_when_no_sibling_repo(
 
     rc = main(["sessions", "is-orphaned-worktree", str(only)])
     assert rc == 1
+
+
+def test_apply_ctrl_x_inserts_project_row_above_n_sentinel() -> None:
+    icons = IconSet.from_style("none")
+    lines = [
+        "s\t3\talpha\talpha",
+        "p\t/p/other\tother\tother",
+        "n\t\tnew session\tnew session",
+    ]
+    out = apply_ctrl_x(lines, sid="3", sess_path="/p/alpha", icons=icons)
+    assert out == [
+        "p\t/p/other\tother\tother",
+        "p\t/p/alpha\talpha\talpha",
+        "n\t\tnew session\tnew session",
+    ]
+
+
+def test_apply_ctrl_x_appends_when_no_sentinel() -> None:
+    icons = IconSet.from_style("none")
+    lines = ["s\t3\talpha\talpha", "p\t/p/other\tother\tother"]
+    out = apply_ctrl_x(lines, sid="3", sess_path="/p/alpha", icons=icons)
+    assert out == [
+        "p\t/p/other\tother\tother",
+        "p\t/p/alpha\talpha\talpha",
+    ]
+
+
+def test_apply_ctrl_x_no_match_returns_lines_unchanged() -> None:
+    icons = IconSet.from_style("none")
+    lines = ["p\t/p/foo\tfoo\tfoo", "n\t\tnew session\tnew session"]
+    out = apply_ctrl_x(lines, sid="9", sess_path="/p/x", icons=icons)
+    assert out == lines
+
+
+def test_apply_ctrl_x_uses_project_icon() -> None:
+    icons = IconSet.from_style("ascii")
+    lines = ["s\t3\talpha\talpha"]
+    out = apply_ctrl_x(lines, sid="3", sess_path="/p/alpha", icons=icons)
+    assert out == ["p\t/p/alpha\talpha\t. alpha"]
+
+
+def test_cli_action_ctrl_x_rewrites_tmpfile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+) -> None:
+    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    tmux_stub(sessions="alpha\t$3\t/p/alpha")
+    tmpfile = tmp_path / "entries"
+    tmpfile.write_text("s\t3\talpha\talpha\np\t/p/other\tother\tother\nn\t\tnew session\tnew session\n")
+
+    rc = main(["sessions", "action", "ctrl-x", "s", "3", str(tmpfile)])
+    assert rc == 0
+
+    out = tmpfile.read_text().splitlines()
+    assert out == [
+        "p\t/p/other\tother\tother",
+        "p\t/p/alpha\talpha\talpha",
+        "n\t\tnew session\tnew session",
+    ]
+
+
+def test_cli_action_ctrl_x_non_session_is_noop(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+) -> None:
+    monkeypatch.setenv("TMUX_SESSIONS_ICON_STYLE", "none")
+    tmux_stub()
+    tmpfile = tmp_path / "entries"
+    before = "p\t/p/foo\tfoo\tfoo\n"
+    tmpfile.write_text(before)
+
+    rc = main(["sessions", "action", "ctrl-x", "p", "/p/foo", str(tmpfile)])
+    assert rc == 0
+    assert tmpfile.read_text() == before

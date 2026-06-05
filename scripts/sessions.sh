@@ -165,24 +165,8 @@ _action_ctrl_d() {
 
 # ctrl-x: kill session only; convert the entry to a project row in place.
 _action_ctrl_x() {
-  local type="$1" id="$2" tmpfile="$3"
-  [[ "$type" != "s" ]] && return
-  local tmux_id="\$$id"
-  local sess_path clean_name
-  sess_path=$(tmux display-message -p -t "$tmux_id" '#{session_path}' 2>/dev/null)
-  clean_name=$(grep $'^s\t'"$id"$'\t' "$tmpfile" | cut -f3)
-  tmux kill-session -t "$tmux_id" 2>/dev/null
-  NEW_SEARCH="$clean_name" \
-  NEW_DISPLAY="${_ICON_PROJECT}${_ICON_SEP}${clean_name}" \
-    awk -F'\t' -v OFS='\t' -v id="$id" -v path="$sess_path" '
-      $1=="s" && $2==id {
-        saved = "p\t" path "\t" ENVIRON["NEW_SEARCH"] "\t" ENVIRON["NEW_DISPLAY"]
-        next
-      }
-      $1=="n" { if (saved != "") { print saved; saved = "" } }
-      { print }
-      END { if (saved != "") print saved }
-    ' "$tmpfile" > "${tmpfile}.new" && mv "${tmpfile}.new" "$tmpfile"
+  TMUX_SESSIONS_ICON_STYLE="$_ICON_STYLE" \
+    _tmux_sessions_py sessions action ctrl-x "$1" "$2" "$3"
 }
 
 # ctrl-r: rename worktree (branch + dir + repair) when on a linked worktree;

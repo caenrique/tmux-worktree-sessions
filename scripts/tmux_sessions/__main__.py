@@ -212,6 +212,21 @@ def build_parser() -> argparse.ArgumentParser:
     is_orphaned_p.add_argument("path", help="candidate worktree directory")
     is_orphaned_p.set_defaults(handler=cmd_sessions_is_orphaned_worktree)
 
+    action_p = sessions_sub.add_parser(
+        "action",
+        help="run a session-picker action (ctrl-x/ctrl-r/ctrl-d)",
+    )
+    action_sub = action_p.add_subparsers(dest="action_name", metavar="<name>")
+
+    ctrl_x_p = action_sub.add_parser(
+        "ctrl-x",
+        help="kill a session and convert its row to a project row",
+    )
+    ctrl_x_p.add_argument("type", help="picker entry type: 's', 'p', or 'n'")
+    ctrl_x_p.add_argument("id", help="session id (without leading $) or project path")
+    ctrl_x_p.add_argument("tmpfile", help="picker entries tmpfile to mutate in place")
+    ctrl_x_p.set_defaults(handler=cmd_sessions_action_ctrl_x)
+
     fetch_reload_p = sub.add_parser(
         "fetch-reload",
         help="background-fetch git, regenerate branch entries, post reload to fzf",
@@ -492,6 +507,27 @@ def cmd_sessions_list_projects(args: argparse.Namespace) -> int:
 def cmd_sessions_is_orphaned_worktree(args: argparse.Namespace) -> int:
     path = Path(args.path)
     return 0 if sessions.is_orphaned_worktree(path, container=path.parent) else 1
+
+
+def cmd_sessions_action_ctrl_x(args: argparse.Namespace) -> int:
+    if args.type != "s":
+        return 0
+    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
+    icons = picker.IconSet.from_style(style)
+    tmux_id = f"${args.id}"
+    sess_path_result = subprocess.run(
+        ["tmux", "display-message", "-p", "-t", tmux_id, "#{session_path}"],
+        capture_output=True,
+        text=True,
+    )
+    sess_path = sess_path_result.stdout.strip()
+    subprocess.run(["tmux", "kill-session", "-t", tmux_id], capture_output=True)
+
+    tmpfile = Path(args.tmpfile)
+    lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+    new_lines = sessions.apply_ctrl_x(lines, sid=args.id, sess_path=sess_path, icons=icons)
+    tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+    return 0
 
 
 def cmd_text_format_session_name(args: argparse.Namespace) -> int:
