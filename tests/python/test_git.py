@@ -18,11 +18,14 @@ from tmux_sessions.git import (
     branch_to_dir,
     default_branch,
     fetch_is_stale,
+    is_linked_worktree,
     list_branches,
     list_git_projects,
     list_worktrees,
+    main_worktree,
     rename_worktree,
     resolve_remote,
+    toplevel,
 )
 
 
@@ -425,3 +428,65 @@ def test_list_git_projects_respects_max_depth(
 
     assert deep not in found_shallow
     assert deep in found_deep
+
+
+def test_toplevel_returns_repo_path(make_repo: Callable[..., Path]) -> None:
+    repo = make_repo("r")
+    assert toplevel(repo) == repo
+
+
+def test_toplevel_from_subdir_returns_repo_root(make_repo: Callable[..., Path]) -> None:
+    repo = make_repo("r")
+    sub = repo / "deep" / "nested"
+    sub.mkdir(parents=True)
+    assert toplevel(sub) == repo
+
+
+def test_toplevel_outside_a_repo_returns_none(tmp_path: Path) -> None:
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    assert toplevel(plain) is None
+
+
+def test_is_linked_worktree_false_for_main_checkout(make_repo: Callable[..., Path]) -> None:
+    repo = make_repo("r")
+    assert is_linked_worktree(repo) is False
+
+
+def test_is_linked_worktree_true_for_linked_worktree(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r")
+    wt = tmp_path / "wt" / "feature"
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(wt)],
+        check=True,
+        capture_output=True,
+    )
+    assert is_linked_worktree(wt) is True
+
+
+def test_is_linked_worktree_false_outside_a_repo(tmp_path: Path) -> None:
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    assert is_linked_worktree(plain) is False
+
+
+def test_main_worktree_returns_main_checkout_path(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+    repo = make_repo("r")
+    wt = tmp_path / "wt" / "feature"
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(wt)],
+        check=True,
+        capture_output=True,
+    )
+    # Asking from either the main checkout or a linked worktree must
+    # both resolve back to the main checkout's path.
+    assert main_worktree(repo) == repo
+    assert main_worktree(wt) == repo
+
+
+def test_main_worktree_outside_a_repo_returns_none(tmp_path: Path) -> None:
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    assert main_worktree(plain) is None

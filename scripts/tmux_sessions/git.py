@@ -85,6 +85,41 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def toplevel(path: Path) -> Path | None:
+    """Return ``rev-parse --show-toplevel`` for ``path``, or ``None``."""
+    result = _git(path, "rev-parse", "--show-toplevel")
+    if result.returncode != 0:
+        return None
+    out = result.stdout.strip()
+    return Path(out) if out else None
+
+
+def is_linked_worktree(path: Path) -> bool:
+    """Return True when ``path`` is a linked git worktree (not the main checkout).
+
+    git stores the per-worktree dir under ``<repo>/.git/worktrees/<name>``,
+    so ``rev-parse --git-dir`` returning a path that contains a
+    ``worktrees`` segment is the canonical "this is a linked worktree"
+    signal. Returns False for the main checkout, plain directories, and
+    anything outside a git repo.
+    """
+    result = _git(path, "rev-parse", "--git-dir")
+    if result.returncode != 0:
+        return False
+    return "worktrees" in result.stdout.strip()
+
+
+def main_worktree(repo: Path) -> Path | None:
+    """Return the path of the main worktree (the regular checkout).
+
+    ``git worktree list --porcelain`` always lists the main worktree
+    first, so we just take the first parsed entry. Returns ``None`` when
+    ``repo`` is not a git directory.
+    """
+    worktrees = list_worktrees(repo)
+    return worktrees[0].path if worktrees else None
+
+
 def resolve_remote(repo: Path) -> str | None:
     """Return ``origin`` if configured, otherwise the first listed remote.
 

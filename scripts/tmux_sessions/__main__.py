@@ -272,30 +272,15 @@ def cmd_sessions_action_ctrl_r(args: argparse.Namespace) -> int:
     else:
         return 0
 
-    git_dir_result = subprocess.run(
-        ["git", "-C", target_path, "rev-parse", "--git-dir"],
-        capture_output=True,
-        text=True,
-    )
-    git_dir = git_dir_result.stdout.strip() if git_dir_result.returncode == 0 else ""
-
     cfg = Config.from_env()
     tmpfile = Path(args.tmpfile)
+    target = Path(target_path)
 
-    if "worktrees" in git_dir:
-        porcelain = subprocess.run(
-            ["git", "-C", target_path, "worktree", "list", "--porcelain"],
-            capture_output=True,
-            text=True,
-        )
-        main_wt = ""
-        for porcelain_line in porcelain.stdout.splitlines():
-            if porcelain_line.startswith("worktree "):
-                main_wt = porcelain_line[len("worktree ") :]
-                break
-        if not main_wt:
+    if git.is_linked_worktree(target):
+        main_wt = git.main_worktree(target)
+        if main_wt is None:
             return 0
-        container = str(Path(main_wt).parent)
+        container = main_wt.parent
 
         old_branch_result = subprocess.run(
             ["git", "-C", target_path, "branch", "--show-current"],
@@ -310,12 +295,7 @@ def cmd_sessions_action_ctrl_r(args: argparse.Namespace) -> int:
         if not new_name or new_name == old_branch:
             return 0
         try:
-            git.rename_worktree(
-                Path(main_wt),
-                Path(container),
-                Path(target_path),
-                new_name=new_name,
-            )
+            git.rename_worktree(main_wt, container, target, new_name=new_name)
         except RuntimeError as exc:
             sys.stderr.write(f"{exc}\n")
             return 1
@@ -348,24 +328,6 @@ def cmd_sessions_action_ctrl_r(args: argparse.Namespace) -> int:
         capture_output=True,
     )
     return 0
-
-
-def _git_dir(path: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", path, "rev-parse", "--git-dir"],
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip() if result.returncode == 0 else ""
-
-
-def _git_toplevel(path: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", path, "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def _confirm_orphan_delete(wt_path: str) -> bool:
@@ -404,21 +366,21 @@ def cmd_sessions_action_ctrl_d(args: argparse.Namespace) -> int:
         new_lines = sessions.remove_session_row(lines, sid=args.id)
         tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
 
-        git_dir = _git_dir(sess_path)
-        if "worktrees" in git_dir:
-            wt_repo = _git_toplevel(sess_path)
-            if wt_repo:
+        sess = Path(sess_path)
+        if git.is_linked_worktree(sess):
+            wt_repo = git.toplevel(sess)
+            if wt_repo is not None:
                 subprocess.run(
-                    ["git", "-C", wt_repo, "worktree", "remove", "--force", sess_path],
+                    ["git", "-C", str(wt_repo), "worktree", "remove", "--force", sess_path],
                     capture_output=True,
                 )
         return 0
 
     if args.type == "p":
         wt_path = args.id
-        git_dir = _git_dir(wt_path)
-        if "worktrees" not in git_dir:
-            if sessions.is_orphaned_worktree(Path(wt_path), container=Path(wt_path).parent):
+        wt = Path(wt_path)
+        if not git.is_linked_worktree(wt):
+            if sessions.is_orphaned_worktree(wt, container=wt.parent):
                 if not _confirm_orphan_delete(wt_path):
                     return 0
                 lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
@@ -432,14 +394,14 @@ def cmd_sessions_action_ctrl_d(args: argparse.Namespace) -> int:
                 )
             return 0
 
-        wt_repo = _git_toplevel(wt_path)
-        if not wt_repo:
+        wt_repo = git.toplevel(wt)
+        if wt_repo is None:
             return 0
         lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
         new_lines = sessions.remove_project_row(lines, path=wt_path)
         tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
         subprocess.run(
-            ["git", "-C", wt_repo, "worktree", "remove", "--force", wt_path],
+            ["git", "-C", str(wt_repo), "worktree", "remove", "--force", wt_path],
             capture_output=True,
         )
         return 0
@@ -459,21 +421,6 @@ def cmd_sessions_display_name(args: argparse.Namespace) -> int:
     derived = text.format_session_name(args.path, home=cfg.home, strip_prefixes=cfg.strip_prefixes)
     sys.stdout.write(derived if derived.replace(".", "_") == args.name else args.name)
     return 0
-
-
-def _container_for_repo(repo_path: str) -> str:
-    """Return the directory holding sibling worktrees for ``repo_path``."""
-    result = subprocess.run(
-        ["git", "-C", repo_path, "worktree", "list", "--porcelain"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return ""
-    for line in result.stdout.splitlines():
-        if line.startswith("worktree "):
-            return str(Path(line[len("worktree ") :]).parent)
-    return ""
 
 
 def _prompt_new_session_name() -> str:
@@ -648,7 +595,7 @@ def _manage_loop(tmpfile: Path, *, cfg: Config) -> int:
 def _handle_ctrl_w(*, row_type: str, key2: str, cfg: Config) -> bool:
     """Drive the ctrl-w (create-worktree) flow; return True to exit the loop."""
     if row_type == "p":
-        repo_path = _git_toplevel(key2)
+        repo_path = git.toplevel(Path(key2))
     elif row_type == "s":
         sess_path_result = subprocess.run(
             ["tmux", "display-message", "-p", "-t", f"${key2}", "#{session_path}"],
@@ -656,20 +603,21 @@ def _handle_ctrl_w(*, row_type: str, key2: str, cfg: Config) -> bool:
             text=True,
         )
         sess_path = sess_path_result.stdout.strip()
-        repo_path = _git_toplevel(sess_path) if sess_path else ""
+        repo_path = git.toplevel(Path(sess_path)) if sess_path else None
     else:
         return False
 
-    if not repo_path:
+    if repo_path is None:
         return False
 
-    container = _container_for_repo(repo_path)
-    if not container:
+    main_wt = git.main_worktree(repo_path)
+    if main_wt is None:
         return False
+    container = main_wt.parent
 
     listen_port = 51200 + secrets.randbelow(14336)
     choice = picker.pick_branch(
-        Path(repo_path),
+        repo_path,
         icons=cfg.icons,
         fetch_reload_argv=_fetch_reload_argv(),
         listen_port=listen_port,
@@ -685,16 +633,16 @@ def _handle_ctrl_w(*, row_type: str, key2: str, cfg: Config) -> bool:
     try:
         if choice.kind == "new":
             wt_path = git.add_worktree(
-                Path(repo_path),
-                Path(container),
+                repo_path,
+                container,
                 branch=None,
                 new_name=choice.name,
                 default_branch_fallback=cfg.default_branch_fallback,
             )
         else:  # "existing"
             wt_path = git.add_worktree(
-                Path(repo_path),
-                Path(container),
+                repo_path,
+                container,
                 branch=choice.name,
                 new_name=None,
                 default_branch_fallback=cfg.default_branch_fallback,
