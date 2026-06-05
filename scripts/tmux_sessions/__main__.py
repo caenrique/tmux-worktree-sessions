@@ -25,10 +25,63 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import fetch_reload, git, picker, score, sessions, text, tmux
+
+
+@dataclass(frozen=True)
+class Config:
+    """Env-driven knobs the picker and its action handlers consume.
+
+    Resolved once per process — the parent ``manage`` loop and each
+    action subprocess fzf spawns each call ``Config.from_env()`` at
+    entry. ``score_file`` is always resolved to a path (never ``None``)
+    so the bump path doesn't branch on configured-or-not.
+    """
+
+    home: str
+    projects_roots: list[Path]
+    max_depth: int
+    strip_prefixes: list[str]
+    manual_spec: str
+    half_life_secs: float
+    path_boost: float
+    score_file: Path
+    icons: picker.IconSet
+    default_branch_fallback: str
+
+    @classmethod
+    def from_env(cls) -> Config:
+        home = os.environ.get("HOME", "")
+        raw_dirs = os.environ.get("TMUX_SESSIONS_PROJECTS_DIRS") or f"{home}/Projects"
+        roots: list[Path] = []
+        for entry in raw_dirs.split():
+            expanded = entry.replace("~", home, 1) if entry.startswith("~") else entry
+            roots.append(Path(expanded))
+
+        score_file_str = (
+            os.environ.get("SCORE_FILE")
+            or os.environ.get("TMUX_SESSIONS_SCORES_FILE")
+            or f"{home}/.local/share/tmux-sessions/scores.tsv"
+        )
+
+        half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
+
+        return cls(
+            home=home,
+            projects_roots=roots,
+            max_depth=int(os.environ.get("TMUX_SESSIONS_MAX_DEPTH") or 6),
+            strip_prefixes=(os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split(),
+            manual_spec=os.environ.get("TMUX_SESSIONS_MANUAL_SESSIONS") or "",
+            half_life_secs=half_life_days * 24 * 3600,
+            path_boost=float(os.environ.get("TMUX_SESSIONS_SCORE_PATH_BOOST") or 1.0),
+            score_file=Path(score_file_str),
+            icons=picker.IconSet.from_style(os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"),
+            default_branch_fallback=os.environ.get("TMUX_SESSIONS_DEFAULT_BRANCH") or "main",
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -101,9 +154,36 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _read_text_or_empty(path: Path) -> str:
+    try:
+        return path.read_text()
+    except FileNotFoundError:
+        return ""
+
+
+def _build_entries_iter(cfg: Config) -> Iterator[str]:
+    """Drive ``sessions.build_entries`` from a resolved ``Config``.
+
+    Reads the score file fresh on every call — picker actions can leave
+    it out of date with the in-memory tmpfile.
+    """
+    score_entries = score.parse_score_table(_read_text_or_empty(cfg.score_file))
+    return sessions.build_entries(
+        home=cfg.home,
+        strip_prefixes=cfg.strip_prefixes,
+        projects_roots=cfg.projects_roots,
+        max_depth=cfg.max_depth,
+        manual_spec=cfg.manual_spec,
+        icons=cfg.icons,
+        score_entries=score_entries,
+        now=time.time(),
+        half_life_secs=cfg.half_life_secs,
+        path_boost=cfg.path_boost,
+    )
+
+
 def cmd_fetch_reload(args: argparse.Namespace) -> int:
-    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
-    icons = picker.IconSet.from_style(style)
+    cfg = Config.from_env()
     repo = Path(args.repo)
     tmpfile = Path(args.tmpfile)
 
@@ -116,53 +196,10 @@ def cmd_fetch_reload(args: argparse.Namespace) -> int:
         return 0
     try:
         os.setsid()
-        fetch_reload.fetch_and_reload(repo, tmpfile, args.port, args.header_base, icons=icons)
+        fetch_reload.fetch_and_reload(repo, tmpfile, args.port, args.header_base, icons=cfg.icons)
         os._exit(0)
     except BaseException:
         os._exit(1)
-
-
-def _resolve_build_entries_config() -> dict[str, object]:
-    """Pull the env-driven knobs that ``build_entries`` consumes.
-
-    Shared between ``cmd_sessions_manage`` and the ``_action_ctrl_r``
-    worktree-rename branch, which has to rebuild the picker tmpfile
-    after the rename moves the row's path.
-    """
-    home = os.environ.get("HOME", "")
-    raw_dirs = os.environ.get("TMUX_SESSIONS_PROJECTS_DIRS") or f"{home}/Projects"
-    max_depth = int(os.environ.get("TMUX_SESSIONS_MAX_DEPTH") or 6)
-    strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
-    manual_spec = os.environ.get("TMUX_SESSIONS_MANUAL_SESSIONS") or ""
-    half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
-    path_boost = float(os.environ.get("TMUX_SESSIONS_SCORE_PATH_BOOST") or 1.0)
-    score_file = os.environ.get("SCORE_FILE", "")
-
-    roots: list[Path] = []
-    for entry in raw_dirs.split():
-        expanded = entry.replace("~", home, 1) if entry.startswith("~") else entry
-        roots.append(Path(expanded))
-
-    if score_file:
-        try:
-            score_text = Path(score_file).read_text()
-        except FileNotFoundError:
-            score_text = ""
-    else:
-        score_text = ""
-    score_entries = score.parse_score_table(score_text)
-
-    return {
-        "home": home,
-        "strip_prefixes": strip_prefixes,
-        "projects_roots": roots,
-        "max_depth": max_depth,
-        "manual_spec": manual_spec,
-        "score_entries": score_entries,
-        "now": time.time(),
-        "half_life_secs": half_life_days * 24 * 3600,
-        "path_boost": path_boost,
-    }
 
 
 def _prompt_rename(initial: str) -> str | None:
@@ -204,8 +241,7 @@ def _prompt_rename(initial: str) -> str | None:
 def cmd_sessions_action_ctrl_x(args: argparse.Namespace) -> int:
     if args.type != "s":
         return 0
-    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
-    icons = picker.IconSet.from_style(style)
+    cfg = Config.from_env()
     tmux_id = f"${args.id}"
     sess_path_result = subprocess.run(
         ["tmux", "display-message", "-p", "-t", tmux_id, "#{session_path}"],
@@ -217,7 +253,7 @@ def cmd_sessions_action_ctrl_x(args: argparse.Namespace) -> int:
 
     tmpfile = Path(args.tmpfile)
     lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
-    new_lines = sessions.apply_ctrl_x(lines, sid=args.id, sess_path=sess_path, icons=icons)
+    new_lines = sessions.apply_ctrl_x(lines, sid=args.id, sess_path=sess_path, icons=cfg.icons)
     tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
     return 0
 
@@ -243,8 +279,7 @@ def cmd_sessions_action_ctrl_r(args: argparse.Namespace) -> int:
     )
     git_dir = git_dir_result.stdout.strip() if git_dir_result.returncode == 0 else ""
 
-    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
-    icons = picker.IconSet.from_style(style)
+    cfg = Config.from_env()
     tmpfile = Path(args.tmpfile)
 
     if "worktrees" in git_dir:
@@ -284,8 +319,7 @@ def cmd_sessions_action_ctrl_r(args: argparse.Namespace) -> int:
         except RuntimeError as exc:
             sys.stderr.write(f"{exc}\n")
             return 1
-        config = _resolve_build_entries_config()
-        rebuilt = list(sessions.build_entries(icons=icons, **config))  # type: ignore[arg-type]
+        rebuilt = list(_build_entries_iter(cfg))
         tmpfile.write_text("\n".join(rebuilt) + ("\n" if rebuilt else ""))
         return 0
 
@@ -305,7 +339,7 @@ def cmd_sessions_action_ctrl_r(args: argparse.Namespace) -> int:
             ["tmux", "rename-session", "-t", tmux_id, new_name],
             capture_output=True,
         )
-        new_lines = sessions.apply_ctrl_r_session_rename(lines, sid=args.id, new_name=new_name, icons=icons)
+        new_lines = sessions.apply_ctrl_r_session_rename(lines, sid=args.id, new_name=new_name, icons=cfg.icons)
         tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
         return 0
 
@@ -421,9 +455,8 @@ def cmd_sessions_display_name(args: argparse.Namespace) -> int:
     when it round-trips, falling back to the stored name when the user
     renamed the session by hand.
     """
-    home = os.environ.get("HOME", "")
-    strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
-    derived = text.format_session_name(args.path, home=home, strip_prefixes=strip_prefixes)
+    cfg = Config.from_env()
+    derived = text.format_session_name(args.path, home=cfg.home, strip_prefixes=cfg.strip_prefixes)
     sys.stdout.write(derived if derived.replace(".", "_") == args.name else args.name)
     return 0
 
@@ -476,17 +509,14 @@ def _prompt_new_session_name() -> str:
     return text.sanitize_name(query)
 
 
-def _bump_score_and_switch(name: str, session_path: Path) -> None:
+def _bump_score_and_switch(name: str, session_path: Path, *, cfg: Config) -> None:
     """Bump the recency score for ``name`` and switch to (or create) the session."""
-    score_file_env = os.environ.get("SCORE_FILE", "")
-    if score_file_env:
-        half_life_days = float(os.environ.get("TMUX_SESSIONS_SCORE_HALF_LIFE") or 14)
-        score.bump_in_file(
-            Path(score_file_env),
-            name=name,
-            now=float(int(time.time())),
-            half_life_secs=half_life_days * 24 * 3600,
-        )
+    score.bump_in_file(
+        cfg.score_file,
+        name=name,
+        now=float(int(time.time())),
+        half_life_secs=cfg.half_life_secs,
+    )
     tmux.switch_or_create(session_path, name)
 
 
@@ -495,44 +525,27 @@ def _fetch_reload_argv() -> list[str]:
     return [sys.executable, "-m", "tmux_sessions", "fetch-reload"]
 
 
-def _resolve_score_file_env() -> str:
-    """Resolve ``SCORE_FILE`` with the configured fallbacks.
-
-    ``SCORE_FILE`` wins; otherwise ``TMUX_SESSIONS_SCORES_FILE``;
-    otherwise ``$HOME/.local/share/tmux-sessions/scores.tsv``.
-    """
-    explicit = os.environ.get("SCORE_FILE")
-    if explicit:
-        return explicit
-    configured = os.environ.get("TMUX_SESSIONS_SCORES_FILE")
-    if configured:
-        return configured
-    home = os.environ.get("HOME", "")
-    return f"{home}/.local/share/tmux-sessions/scores.tsv"
-
-
 def cmd_sessions_manage(args: argparse.Namespace) -> int:
     """Run the top-level session picker fzf loop."""
-    score_file = _resolve_score_file_env()
-    os.environ["SCORE_FILE"] = score_file
-
-    style = os.environ.get("TMUX_SESSIONS_ICON_STYLE") or "nerd"
-    icons = picker.IconSet.from_style(style)
+    cfg = Config.from_env()
+    # Children spawned by fzf binds re-resolve via Config.from_env(), so
+    # propagate the resolved score-file path through SCORE_FILE in case
+    # only TMUX_SESSIONS_SCORES_FILE was set at parent entry.
+    os.environ["SCORE_FILE"] = str(cfg.score_file)
 
     with tempfile.NamedTemporaryFile("w", delete=False, suffix=".entries") as initial:
         tmpfile = Path(initial.name)
-        config = _resolve_build_entries_config()
-        for line in sessions.build_entries(icons=icons, **config):  # type: ignore[arg-type]
+        for line in _build_entries_iter(cfg):
             initial.write(line + "\n")
 
     try:
-        return _manage_loop(tmpfile, icons=icons)
+        return _manage_loop(tmpfile, cfg=cfg)
     finally:
         with contextlib.suppress(FileNotFoundError):
             tmpfile.unlink()
 
 
-def _manage_loop(tmpfile: Path, *, icons: picker.IconSet) -> int:
+def _manage_loop(tmpfile: Path, *, cfg: Config) -> int:
     # Action binds re-invoke the dispatcher itself; using
     # ``sys.executable`` keeps the venv's interpreter active in the
     # subshell fzf spawns. The inline {1}/{2}/{n} placeholders are
@@ -612,7 +625,7 @@ def _manage_loop(tmpfile: Path, *, icons: picker.IconSet) -> int:
         search = fields[2] if len(fields) > 2 else ""
 
         if key == "ctrl-w":
-            if _handle_ctrl_w(row_type=row_type, key2=key2, icons=icons):
+            if _handle_ctrl_w(row_type=row_type, key2=key2, cfg=cfg):
                 return 0
             continue
 
@@ -620,12 +633,11 @@ def _manage_loop(tmpfile: Path, *, icons: picker.IconSet) -> int:
             new_name = _prompt_new_session_name()
             if not new_name:
                 continue
-            home = os.environ.get("HOME", "")
-            _bump_score_and_switch(new_name, Path(home))
+            _bump_score_and_switch(new_name, Path(cfg.home), cfg=cfg)
             return 0
 
         if row_type == "p":
-            _bump_score_and_switch(search, Path(key2))
+            _bump_score_and_switch(search, Path(key2), cfg=cfg)
             return 0
 
         if row_type == "s":
@@ -633,7 +645,7 @@ def _manage_loop(tmpfile: Path, *, icons: picker.IconSet) -> int:
             return 0
 
 
-def _handle_ctrl_w(*, row_type: str, key2: str, icons: picker.IconSet) -> bool:
+def _handle_ctrl_w(*, row_type: str, key2: str, cfg: Config) -> bool:
     """Drive the ctrl-w (create-worktree) flow; return True to exit the loop."""
     if row_type == "p":
         repo_path = _git_toplevel(key2)
@@ -658,7 +670,7 @@ def _handle_ctrl_w(*, row_type: str, key2: str, icons: picker.IconSet) -> bool:
     listen_port = 51200 + secrets.randbelow(14336)
     choice = picker.pick_branch(
         Path(repo_path),
-        icons=icons,
+        icons=cfg.icons,
         fetch_reload_argv=_fetch_reload_argv(),
         listen_port=listen_port,
         now=time.time(),
@@ -670,7 +682,6 @@ def _handle_ctrl_w(*, row_type: str, key2: str, icons: picker.IconSet) -> bool:
     if choice.kind == "back":
         return False
 
-    fallback = os.environ.get("TMUX_SESSIONS_DEFAULT_BRANCH") or "main"
     try:
         if choice.kind == "new":
             wt_path = git.add_worktree(
@@ -678,7 +689,7 @@ def _handle_ctrl_w(*, row_type: str, key2: str, icons: picker.IconSet) -> bool:
                 Path(container),
                 branch=None,
                 new_name=choice.name,
-                default_branch_fallback=fallback,
+                default_branch_fallback=cfg.default_branch_fallback,
             )
         else:  # "existing"
             wt_path = git.add_worktree(
@@ -686,16 +697,14 @@ def _handle_ctrl_w(*, row_type: str, key2: str, icons: picker.IconSet) -> bool:
                 Path(container),
                 branch=choice.name,
                 new_name=None,
-                default_branch_fallback=fallback,
+                default_branch_fallback=cfg.default_branch_fallback,
             )
     except RuntimeError as exc:
         sys.stderr.write(f"{exc}\n")
         return False
 
-    home = os.environ.get("HOME", "")
-    strip_prefixes = (os.environ.get("TMUX_SESSIONS_STRIP_PREFIXES") or "").split()
-    name = text.format_session_name(str(wt_path), home=home, strip_prefixes=strip_prefixes)
-    _bump_score_and_switch(name, wt_path)
+    name = text.format_session_name(str(wt_path), home=cfg.home, strip_prefixes=cfg.strip_prefixes)
+    _bump_score_and_switch(name, wt_path, cfg=cfg)
     return True
 
 
