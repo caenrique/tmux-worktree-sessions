@@ -126,23 +126,21 @@ When you create a worktree via `Ctrl-W`, the new directory is placed as a siblin
 
 ## Development
 
-Tests live in `tests/` and run under [bats-core](https://github.com/bats-core/bats-core); shell scripts are linted with [shellcheck](https://www.shellcheck.net/). A Python migration is in progress (see `docs/python-migration.md`): new code under `scripts/tmux_sessions/` is checked with `pytest`, `ruff`, and `mypy --strict`. The Makefile wraps everything:
+Tests live in `tests/` and run under [bats-core](https://github.com/bats-core/bats-core); shell scripts are linted with [shellcheck](https://www.shellcheck.net/). A Python migration is in progress (see `docs/python-migration.md`): new code under `scripts/tmux_sessions/` is checked with `pytest`, `ruff`, and `mypy --strict`.
+
+The dev environment is driven by [devenv](https://devenv.sh/), which provisions tmux, fzf, fd, bats, shellcheck, git, and a `uv`-managed Python venv in one shell. Install [Nix](https://nixos.org/download) and devenv, then:
 
 ```sh
-brew install bats-core shellcheck
-python3 -m venv .venv
-.venv/bin/pip install -e '.[dev]'   # ruff, mypy, pytest, pytest-mock
-
-make check               # lint + bats + Python checks (default target)
-make test                # bats only
-make lint                # shellcheck only
-make py-check            # ruff + mypy + pytest
+devenv shell                            # enter the dev shell (uv sync runs automatically)
+devenv test                             # run every check (what CI runs)
+devenv tasks run python:test            # one task at a time
+devenv tasks run bats:test
+devenv tasks run shellcheck:lint
 ```
 
-The Makefile picks up `.venv/bin/{python,ruff,mypy}` automatically when
-the venv exists, so the `make py-*` targets work without activating it.
+Available tasks: `python:test`, `python:lint`, `python:format-check`, `python:typecheck`, `bats:test`, `shellcheck:lint`. Each is also wired before `devenv:enterTest`, so `devenv test` is the single entry point for the full suite.
 
-All three suites run in CI on every push and pull request. Code changes should keep them green and address any shellcheck warnings on touched files.
+All checks run in CI on Linux and macOS for every push and pull request via `devenv test`.
 
 ## Recency ranking
 

@@ -8,8 +8,7 @@ removes the last bash file once parity is reached.
 ## Ground rules
 
 - Each step is independently shippable. After every step:
-  - `make check` must pass (bats + shellcheck).
-  - Any new Python checks (`make py-check`) must pass.
+  - `devenv test` must pass (bats + shellcheck + Python checks).
   - The plugin must still work end-to-end (manual smoke check on tmux).
 - All Python code uses **explicit type annotations** on every function
   signature and on non-obvious local variables. `mypy --strict` must pass.
@@ -63,20 +62,17 @@ removes the last bash file once parity is reached.
   that prints usage and exits 1 (commands get registered in later steps).
 - Add `tests/python/__init__.py` and `tests/python/test_smoke.py` with a
   trivial `test_dispatcher_prints_usage` case.
-- Update `Makefile`:
-  - `py-test`: `python3 -m pytest tests/python`
-  - `py-lint`: `ruff check scripts/ tests/python`
-  - `py-format-check`: `ruff format --check scripts/ tests/python`
-  - `py-typecheck`: `mypy scripts/tmux_sessions`
-  - `py-check`: depends on the four above.
-  - `check`: extend to depend on `py-check`.
-- Update `.github/workflows/tests.yml` to install Python deps and run
-  `make py-check` on both Linux and macOS.
+- Wire Python check tasks into the build-system runner (originally
+  `Makefile` targets; later migrated to devenv tasks
+  `python:test` / `python:lint` / `python:format-check` /
+  `python:typecheck`, all wired before `devenv:enterTest`).
+- Update `.github/workflows/tests.yml` to run the Python checks on
+  both Linux and macOS.
 - Update `CLAUDE.md` and `README.md` Development section with Python
   setup instructions.
 
-**Acceptance:** `make check` passes (bats + shellcheck + Python tooling).
-The dispatcher exists but does nothing useful yet.
+**Acceptance:** the full `check` task passes (bats + shellcheck +
+Python tooling). The dispatcher exists but does nothing useful yet.
 
 ### Step 2 — Move `sort_by_score.py` into the package `[x]`
 
@@ -88,7 +84,7 @@ The dispatcher exists but does nothing useful yet.
 - Keep the bats `sort_by_score` cases unchanged; they exercise the bash
   shim end-to-end.
 
-**Acceptance:** `make check` green. `python3 -m tmux_sessions score sort`
+**Acceptance:** `devenv test` green. `python3 -m tmux_sessions score sort`
 works as a drop-in replacement for the old script path.
 
 ### Step 2.5 — Establish CLI / pure logic separation `[x]`
@@ -113,7 +109,7 @@ works as a drop-in replacement for the old script path.
   `python3 -m tmux_sessions score sort "$@"`. Bats `sort_by_score`
   cases continue to exercise the round-trip end-to-end.
 
-**Acceptance:** `make check` green. The pure / CLI split establishes
+**Acceptance:** `devenv test` green. The pure / CLI split establishes
 the shape every later migration step inherits.
 
 ---
@@ -353,7 +349,7 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
   `python3 -m tmux_sessions sessions manage` directly.
 - The `.tmux` file stays bash — it is one TPM hook and `run-shell`
   invocation, simpler in bash than reimplementing tmux option parsing.
-- Drop shellcheck from `make check` for the deleted files; keep it
+- Drop the deleted files from the `shellcheck:lint` task; keep it
   scoped to `tmux-sessions.tmux` (and any leftover `.bash` test
   helpers).
 
@@ -364,9 +360,9 @@ layer; CLI handlers in `__main__.py` are one-line passthroughs.
 - Delete `tests/*.bats`, `tests/test_helper.bash`, `tests/helpers/`,
   `tests/fixtures/bin/`. Replace with their Python equivalents under
   `tests/python/`.
-- Update `Makefile`: `make test` becomes `make py-test`. Drop bats
-  install instructions from `CLAUDE.md` and `README.md`.
-- Update CI to drop bats install.
+- Drop the `bats:test` task from `devenv.nix` and remove `pkgs.bats`
+  from `packages`. Drop bats install instructions from `CLAUDE.md`
+  and `README.md`.
 
 ### Step 25 — Final polish `[ ]`
 

@@ -2,25 +2,40 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Testing
+## Development
 
-The test suite lives in `tests/` and runs under [bats-core](https://github.com/bats-core/bats-core). Install the runner from your package manager:
+The dev environment is driven by [devenv](https://devenv.sh/), which
+provisions tmux, fzf, fd, bats, shellcheck, git, and a `uv`-managed
+Python venv in one Nix shell. Install [Nix](https://nixos.org/download)
+and devenv, then enter the shell:
 
 ```sh
-brew install bats-core
-# or on Debian/Ubuntu:
-sudo apt-get install bats
+devenv shell        # uv sync runs automatically; all tools land on PATH
 ```
 
-`tests/test_helper.bash` ships a minimal portable assertion library, so `bats-support` / `bats-assert` / `bats-file` are not required.
-
-Run the full suite via the Makefile, or invoke bats directly for finer control:
+Inside the shell, run the full suite or any individual task:
 
 ```sh
-make test                                      # full bats suite
-bats tests/common.bats                         # one file
+devenv test                                    # run every check (what CI runs)
+devenv tasks run python:test                   # pytest only
+devenv tasks run python:lint                   # ruff check
+devenv tasks run python:format-check           # ruff format --check
+devenv tasks run python:typecheck              # mypy --strict
+devenv tasks run bats:test                     # full bats suite
+devenv tasks run shellcheck:lint               # shellcheck on shell sources
+```
+
+Each task is also wired with `before = [ "devenv:enterTest" ]`, so
+`devenv test` is the single entry point that drives them all.
+
+Tools are also on PATH directly inside the shell, so finer-grained
+invocations work too:
+
+```sh
+bats tests/common.bats                         # one bats file
 bats --filter "format_session_name" tests/     # one function
 bats --print-output-on-failure tests/          # show captured output on failure
+pytest tests/python/test_score.py              # one pytest file
 ```
 
 For ad-hoc smoke checks, you can still drive a script directly:
@@ -31,55 +46,10 @@ TMUX_SESSIONS_ICON_STYLE=nerd \
 bash scripts/sessions.sh
 ```
 
-## Linting
-
-Shell scripts are linted with [shellcheck](https://www.shellcheck.net/):
-
-```sh
-brew install shellcheck
-# or on Debian/Ubuntu:
-sudo apt-get install shellcheck
-```
-
-Run it from the repo root before committing:
-
-```sh
-make lint                  # shellcheck only
-make check                 # lint + bats + Python checks (the default target)
-```
-
-The same scans run in CI via `.github/workflows/tests.yml`.
-
-## Python tooling
-
 A migration is in progress to move the bash scripts to a typed Python
 package under `scripts/tmux_sessions/` (see `docs/python-migration.md`).
-Python ≥ 3.8 is required; dev dependencies are declared in `pyproject.toml`.
-
-Set up a project-local virtualenv and install dev dependencies:
-
-```sh
-python3 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
-```
-
-The Makefile auto-detects `.venv/bin/{python,ruff,mypy}` when present,
-so the `make py-*` targets work without activating the venv. Override
-`PY=`, `RUFF=`, or `MYPY=` on the make command line to point at tools
-elsewhere.
-
-Per-tool make targets are wired up so each check can be run in isolation:
-
-```sh
-make py-test           # pytest (tests/python)
-make py-lint           # ruff check
-make py-format-check   # ruff format --check
-make py-typecheck      # mypy --strict on scripts/tmux_sessions
-make py-check          # all four above
-```
-
-`make check` includes `py-check`, so a full local check is `make check`.
-
+Python ≥ 3.8 is required; dev dependencies are declared in
+`pyproject.toml` under `[dependency-groups].dev` and synced by `uv`.
 All Python code uses **explicit type annotations** on every function
 signature; `mypy --strict` must pass. `tests/python/` mirrors the bats
 suite as functions are migrated.
@@ -97,7 +67,7 @@ A change is not done until both the test suite and shellcheck are green.
 - New external dependency invoked by the scripts → add a programmable stub under `tests/fixtures/bin/` and a loader hook in `tests/test_helper.bash`.
 - Regression fixes → add a failing test first, then make it pass.
 
-CI runs the bats suite on Linux and macOS, and shellcheck on Linux, for every push and pull request via `.github/workflows/tests.yml`.
+CI runs `devenv test` on Linux and macOS for every push and pull request via `.github/workflows/tests.yml` — that runs bats, shellcheck, and the Python checks together.
 
 ## Architecture
 
