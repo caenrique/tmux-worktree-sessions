@@ -1,3 +1,9 @@
+# Temporary workaround: CI runs the dev tasks directly instead of via
+# `devenv test`. Devenv-on-CI has been failing with sporadic `path '...' is
+# not valid` errors during shell evaluation, caused by a Nix garbage-collector
+# race fixed in NixOS/nix#15992 (merged 2026-06-07) but not yet in any Nix
+# release. Once a Nix release containing the fix ships and cachix/install-nix-action
+# picks it up, revert this file to the devenv-based flow.
 name: tests
 
 on:
@@ -15,14 +21,31 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: cachix/install-nix-action@v31
-
-      - uses: cachix/cachix-action@v16
+      - uses: astral-sh/setup-uv@v6
         with:
-          name: devenv
+          enable-cache: true
 
-      - name: Install devenv
-        run: nix profile add nixpkgs#devenv
+      - name: Install shellcheck
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y shellcheck
+          else
+            brew install shellcheck
+          fi
 
-      - name: Run devenv test
-        run: devenv test
+      - run: uv sync
+
+      - name: pytest
+        run: uv run pytest tests/python
+
+      - name: ruff lint
+        run: uv run ruff check scripts/ tests/python
+
+      - name: ruff format check
+        run: uv run ruff format --check scripts/ tests/python
+
+      - name: mypy
+        run: uv run mypy scripts/tmux_worktree_sessions
+
+      - name: shellcheck
+        run: shellcheck --severity=warning tmux-worktree-sessions.tmux
