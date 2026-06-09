@@ -10,7 +10,6 @@ rewrites; CLI-layer cases for the four production action subcommands
 from __future__ import annotations
 
 import io
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -185,22 +184,15 @@ def test_list_projects_emits_one_row_per_git_project(
 def test_list_projects_surfaces_subfolder_layout_worktrees(
     tmp_path: Path,
     make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
 ) -> None:
     """Subfolder-layout linked worktrees are pruned by ``fd``; ``list_projects``
     must still surface them by enumerating ``git worktree list`` per repo."""
-    import subprocess as _sp
-
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
     repo = make_repo("projects/foo")
-    sub = repo / ".worktrees"
-    sub.mkdir()
-    feature = sub / "feature"
-    _sp.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(feature)],
-        check=True,
-        capture_output=True,
-    )
+    feature = repo / ".worktrees" / "feature"
+    worktree_add(repo, feature, "feature", new_branch=True)
 
     pairs = _list_projects_pairs(projects_dir=projects_dir, home=str(tmp_path))
 
@@ -212,23 +204,18 @@ def test_list_projects_surfaces_subfolder_layout_worktrees(
 def test_list_projects_sibling_layout_emits_each_worktree_once(
     tmp_path: Path,
     make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
 ) -> None:
     """Sibling-layout repos: ``fd`` finds every worktree directory directly
     via its own ``.git`` entry, so each appears as its own row exactly once
     without any extra enumeration."""
-    import subprocess as _sp
-
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
     container = projects_dir / "repo"
     container.mkdir()
     repo = make_repo("projects/repo/main")
     feature = container / "feature"
-    _sp.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(feature)],
-        check=True,
-        capture_output=True,
-    )
+    worktree_add(repo, feature, "feature", new_branch=True)
 
     pairs = _list_projects_pairs(projects_dir=projects_dir, home=str(tmp_path), max_depth=6)
 
@@ -305,20 +292,17 @@ def test_apply_ctrl_x_uses_project_icon() -> None:
 
 
 def test_cli_action_ctrl_x_rewrites_tmpfile(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    cli_env: Path,
     tmux_stub: Callable[..., object],
+    entries_file: Callable[[str], Path],
 ) -> None:
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     tmux_stub(sessions="alpha\t$3\t/p/alpha")
-    tmpfile = tmp_path / "entries"
-    tmpfile.write_text("s\t3\talpha\talpha\np\t/p/other\tother\tother\nn\t\tnew session\tnew session\n")
+    tmpfile = entries_file("s\t3\talpha\talpha\np\t/p/other\tother\tother\nn\t\tnew session\tnew session\n")
 
     rc = main(["_internal", "session-action", "ctrl-x", "s", "3", str(tmpfile)])
     assert rc == 0
 
-    out = tmpfile.read_text().splitlines()
-    assert out == [
+    assert tmpfile.read_text().splitlines() == [
         "p\t/p/other\tother\tother",
         "p\t/p/alpha\talpha\talpha",
         "n\t\tnew session\tnew session",
@@ -326,15 +310,13 @@ def test_cli_action_ctrl_x_rewrites_tmpfile(
 
 
 def test_cli_action_ctrl_x_non_session_is_noop(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    cli_env: Path,
     tmux_stub: Callable[..., object],
+    entries_file: Callable[[str], Path],
 ) -> None:
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     tmux_stub()
-    tmpfile = tmp_path / "entries"
     before = "p\t/p/foo\tfoo\tfoo\n"
-    tmpfile.write_text(before)
+    tmpfile = entries_file(before)
 
     rc = main(["_internal", "session-action", "ctrl-x", "p", "/p/foo", str(tmpfile)])
     assert rc == 0
@@ -511,18 +493,17 @@ def test_apply_ctrl_r_session_rename_no_match_returns_lines_unchanged() -> None:
 
 
 def test_cli_action_ctrl_r_session_non_worktree_calls_tmux_rename(
-    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
     tmp_path: Path,
     tmux_stub: Callable[..., object],
     fzf_stub: object,
+    entries_file: Callable[[str], Path],
 ) -> None:
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     plain = tmp_path / "plain"
     plain.mkdir()
     stub = tmux_stub(sessions=f"alpha\t$3\t{plain}")
     fzf_stub.respond("shiny new")  # type: ignore[attr-defined]
-    tmpfile = tmp_path / "entries"
-    tmpfile.write_text("s\t3\talpha\talpha\n")
+    tmpfile = entries_file("s\t3\talpha\talpha\n")
 
     rc = main(["_internal", "session-action", "ctrl-r", "s", "3", str(tmpfile)])
     assert rc == 0
@@ -534,16 +515,15 @@ def test_cli_action_ctrl_r_session_non_worktree_calls_tmux_rename(
 
 
 def test_cli_action_ctrl_r_project_non_worktree_displays_warning(
-    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
     tmp_path: Path,
     tmux_stub: Callable[..., object],
+    entries_file: Callable[[str], Path],
 ) -> None:
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     plain = tmp_path / "plain"
     plain.mkdir()
     stub = tmux_stub()
-    tmpfile = tmp_path / "entries"
-    tmpfile.write_text(f"p\t{plain}\tplain\tplain\n")
+    tmpfile = entries_file(f"p\t{plain}\tplain\tplain\n")
 
     rc = main(["_internal", "session-action", "ctrl-r", "p", str(plain), str(tmpfile)])
     assert rc == 0
@@ -569,44 +549,19 @@ def test_remove_project_row_drops_matching_path() -> None:
     assert remove_project_row(lines, path="/p/foo") == ["p\t/p/bar\tbar\tbar"]
 
 
-def _mkworktree(repo: Path, branch: str, path: Path) -> None:
-    """Create a linked worktree at ``path`` checked out on ``branch``."""
-    import subprocess as _sp
-
-    has_branch = (
-        _sp.run(
-            ["git", "-C", str(repo), "rev-parse", "--verify", branch],
-            capture_output=True,
-        ).returncode
-        == 0
-    )
-    if has_branch:
-        _sp.run(
-            ["git", "-C", str(repo), "worktree", "add", "-q", str(path), branch],
-            check=True,
-            capture_output=True,
-        )
-    else:
-        _sp.run(
-            ["git", "-C", str(repo), "worktree", "add", "-q", "-b", branch, str(path)],
-            check=True,
-            capture_output=True,
-        )
-
-
 def test_cli_action_ctrl_d_session_with_worktree_kills_and_removes(
-    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
     tmp_path: Path,
     tmux_stub: Callable[..., object],
     make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    entries_file: Callable[[str], Path],
 ) -> None:
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     repo = make_repo("r", with_remote=True)
     wt = tmp_path / "wt" / "feature"
-    _mkworktree(repo, "feature", wt)
+    worktree_add(repo, wt, "feature", new_branch=True)
     stub = tmux_stub(sessions=f"feature\t$5\t{wt}")
-    tmpfile = tmp_path / "entries"
-    tmpfile.write_text("s\t5\tfeature\tfeature\np\t/other/proj\tother\tother\n")
+    tmpfile = entries_file("s\t5\tfeature\tfeature\np\t/other/proj\tother\tother\n")
 
     rc = main(["_internal", "session-action", "ctrl-d", "s", "5", str(tmpfile)])
     assert rc == 0
@@ -620,16 +575,15 @@ def test_cli_action_ctrl_d_session_with_worktree_kills_and_removes(
 
 
 def test_cli_action_ctrl_d_session_only_path_kills_and_strips(
-    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
     tmp_path: Path,
     tmux_stub: Callable[..., object],
+    entries_file: Callable[[str], Path],
 ) -> None:
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     plain = tmp_path / "plain"
     plain.mkdir()
     stub = tmux_stub(sessions=f"plain\t$7\t{plain}")
-    tmpfile = tmp_path / "entries"
-    tmpfile.write_text("s\t7\tplain\tplain\np\t/other/proj\tother\tother\n")
+    tmpfile = entries_file("s\t7\tplain\tplain\np\t/other/proj\tother\tother\n")
 
     rc = main(["_internal", "session-action", "ctrl-d", "s", "7", str(tmpfile)])
     assert rc == 0
@@ -642,16 +596,16 @@ def test_cli_action_ctrl_d_session_only_path_kills_and_strips(
 
 
 def test_cli_action_ctrl_d_project_linked_worktree_removes(
-    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
     tmp_path: Path,
     make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    entries_file: Callable[[str], Path],
 ) -> None:
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     repo = make_repo("r", with_remote=True)
     wt = tmp_path / "wt" / "feature"
-    _mkworktree(repo, "feature", wt)
-    tmpfile = tmp_path / "entries"
-    tmpfile.write_text(f"p\t{wt}\tfeature\tfeature\np\t/other/proj\tother\tother\n")
+    worktree_add(repo, wt, "feature", new_branch=True)
+    tmpfile = entries_file(f"p\t{wt}\tfeature\tfeature\np\t/other/proj\tother\tother\n")
 
     rc = main(["_internal", "session-action", "ctrl-d", "p", str(wt), str(tmpfile)])
     assert rc == 0
@@ -662,60 +616,47 @@ def test_cli_action_ctrl_d_project_linked_worktree_removes(
     assert not wt.exists()
 
 
-def test_cli_action_ctrl_d_orphan_dir_yes_deletes(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("answer", "expect_orphan", "extra_row"),
+    [
+        ("Yes", False, "p\t/other\tother\tother\n"),
+        ("No", True, ""),
+    ],
+)
+def test_cli_action_ctrl_d_orphan_dir_respects_confirm(
+    cli_env: Path,
     tmp_path: Path,
     fzf_stub: object,
     make_repo: Callable[..., Path],
+    entries_file: Callable[[str], Path],
+    answer: str,
+    expect_orphan: bool,
+    extra_row: str,
 ) -> None:
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
+    """ctrl-d on an orphan dir prompts via fzf; Yes deletes, No keeps."""
     make_repo("wt/realrepo")
     orphan = tmp_path / "wt" / "orphan"
     orphan.mkdir(parents=True)
-    fzf_stub.respond("Yes")  # type: ignore[attr-defined]
-    tmpfile = tmp_path / "entries"
-    tmpfile.write_text(f"p\t{orphan}\torphan\torphan\np\t/other\tother\tother\n")
+    fzf_stub.respond(answer)  # type: ignore[attr-defined]
+    tmpfile = entries_file(f"p\t{orphan}\torphan\torphan\n{extra_row}")
 
     rc = main(["_internal", "session-action", "ctrl-d", "p", str(orphan), str(tmpfile)])
     assert rc == 0
 
-    out = tmpfile.read_text()
-    assert str(orphan) not in out
-    assert not orphan.exists()
-
-
-def test_cli_action_ctrl_d_orphan_dir_no_keeps(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    fzf_stub: object,
-    make_repo: Callable[..., Path],
-) -> None:
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
-    make_repo("wt/realrepo")
-    orphan = tmp_path / "wt" / "orphan"
-    orphan.mkdir(parents=True)
-    fzf_stub.respond("No")  # type: ignore[attr-defined]
-    tmpfile = tmp_path / "entries"
-    tmpfile.write_text(f"p\t{orphan}\torphan\torphan\n")
-
-    rc = main(["_internal", "session-action", "ctrl-d", "p", str(orphan), str(tmpfile)])
-    assert rc == 0
-
-    assert orphan.exists()
-    assert str(orphan) in tmpfile.read_text()
+    assert orphan.exists() is expect_orphan
+    assert (str(orphan) in tmpfile.read_text()) is expect_orphan
 
 
 def test_cli_action_ctrl_d_non_orphan_non_worktree_displays_message(
-    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
     tmp_path: Path,
     tmux_stub: Callable[..., object],
+    entries_file: Callable[[str], Path],
 ) -> None:
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     notes = tmp_path / "lonely" / "notes"
     notes.mkdir(parents=True)
     stub = tmux_stub()
-    tmpfile = tmp_path / "entries"
-    tmpfile.write_text(f"p\t{notes}\tnotes\tnotes\n")
+    tmpfile = entries_file(f"p\t{notes}\tnotes\tnotes\n")
 
     rc = main(["_internal", "session-action", "ctrl-d", "p", str(notes), str(tmpfile)])
     assert rc == 0
@@ -727,41 +668,38 @@ def test_cli_action_ctrl_d_non_orphan_non_worktree_displays_message(
     ), invocations
 
 
-def test_cli_display_name_returns_derived_when_normalises(
+@pytest.mark.parametrize(
+    ("name_arg", "expected"),
+    [
+        # tmux-stored name normalises back to the derived dotted form
+        ("~/with_dot", "~/with.dot"),
+        # tmux-stored name does NOT round-trip → emit the raw stored name
+        ("manual_name", "manual_name"),
+    ],
+)
+def test_cli_display_name(
     monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
     tmp_path: Path,
+    name_arg: str,
+    expected: str,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("TWS_STRIP_PREFIXES", "")
     stdout = io.StringIO()
     monkeypatch.setattr("sys.stdout", stdout)
 
-    rc = main(["sessions", "display-name", f"{tmp_path}/with.dot", "~/with_dot"])
+    path_arg = f"{tmp_path}/with.dot" if "with" in name_arg else f"{tmp_path}/foo"
+    rc = main(["sessions", "display-name", path_arg, name_arg])
     assert rc == 0
-    assert stdout.getvalue() == "~/with.dot"
-
-
-def test_cli_display_name_falls_back_to_raw_on_mismatch(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("TWS_STRIP_PREFIXES", "")
-    stdout = io.StringIO()
-    monkeypatch.setattr("sys.stdout", stdout)
-
-    rc = main(["sessions", "display-name", f"{tmp_path}/foo", "manual_name"])
-    assert rc == 0
-    assert stdout.getvalue() == "manual_name"
+    assert stdout.getvalue() == expected
 
 
 def test_cli_worktree_manage_outside_repo_displays_message(
     monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
     tmp_path: Path,
     tmux_stub: Callable[..., object],
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
     monkeypatch.setenv("TMUX_STUB_PANE_PATH", str(tmp_path))
     stub = tmux_stub()
 
@@ -776,28 +714,16 @@ def test_cli_worktree_manage_outside_repo_displays_message(
 
 def test_cli_worktree_manage_in_repo_invokes_branch_picker(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    cli_env: Path,
     tmux_stub: Callable[..., object],
     fzf_stub: object,
     make_repo: Callable[..., Path],
+    touch_fetch_head: Callable[[Path], None],
 ) -> None:
     """Standalone `worktree manage` resolves the pane's repo and drives
     `pick_branch`. Stubbed fzf returns Esc → exit 0 without any picks."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
-    monkeypatch.setenv("TWS_DEFAULT_WORKTREE_LAYOUT", "subfolder")
-    monkeypatch.setenv("SCORE_FILE", str(tmp_path / "scores.tsv"))
     repo = make_repo("r", with_remote=True)
-    # Touch FETCH_HEAD so pick_branch's stale-fetch background process
-    # is not spawned during the test.
-    common = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--git-common-dir"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    common_path = Path(common) if Path(common).is_absolute() else repo / common
-    (common_path / "FETCH_HEAD").touch()
+    touch_fetch_head(repo)  # don't spawn the stale-fetch background helper
     monkeypatch.setenv("TMUX_STUB_PANE_PATH", str(repo))
     tmux_stub()
     fzf_stub.esc()  # type: ignore[attr-defined]
@@ -813,6 +739,7 @@ def test_cli_worktree_manage_in_repo_invokes_branch_picker(
 
 def test_cli_manage_invokes_fzf_with_popup_args(
     monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
     tmp_path: Path,
     tmux_stub: Callable[..., object],
     fzf_stub: object,
@@ -820,15 +747,7 @@ def test_cli_manage_invokes_fzf_with_popup_args(
     """Default invocation calls fzf with popup args; stub Esc → exit 0."""
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
-    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("TWS_PROJECTS_DIRS", str(projects_dir))
-    monkeypatch.setenv("TWS_MAX_DEPTH", "4")
-    monkeypatch.setenv("TWS_STRIP_PREFIXES", "")
-    monkeypatch.setenv("TWS_MANUAL_SESSIONS", "")
-    monkeypatch.setenv("TWS_ICON_STYLE", "none")
-    monkeypatch.setenv("TWS_SCORE_HALF_LIFE", "14")
-    monkeypatch.setenv("TWS_SCORE_PATH_BOOST", "1.0")
-    monkeypatch.setenv("SCORE_FILE", str(tmp_path / "scores.tsv"))
     tmux_stub(sessions="")
     fzf_stub.esc()  # type: ignore[attr-defined]
 
@@ -851,3 +770,154 @@ def test_cli_manage_invokes_fzf_with_popup_args(
     preview_idx = flat.index("--preview")
     assert "'$'{2}" in flat[preview_idx + 1]
     assert "'\\$'" not in flat[preview_idx + 1]
+
+
+# ── End-to-end ``sessions manage`` enter-on-row flows ─────────────────────────
+#
+# Drive the full picker dispatcher with a stubbed fzf so the
+# ``run_session_picker`` → ``_dispatch_session_selection`` → bump+switch
+# path is exercised. fzf's ``--expect`` mode prints two lines: line 1 is
+# the expect-key (empty for Enter), line 2 is the selected row's TSV.
+
+
+def test_cli_manage_enter_on_project_creates_session_and_bumps_score(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+    fzf_stub: object,
+) -> None:
+    """Enter on a ``p`` row: tmux starts the session and the score file
+    records the bump. Exercises ``bump_score_and_switch`` end-to-end."""
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setenv("TWS_PROJECTS_DIRS", str(projects_dir))
+    stub = tmux_stub(sessions="", new_id="$42")
+    # Picker returns Enter (empty key) on a project row.
+    fzf_stub.respond("\np\t/p/foo\tfoo\tfoo")  # type: ignore[attr-defined]
+
+    rc = main(["sessions", "manage"])
+    assert rc == 0
+
+    assert cli_env.is_file()
+    assert "foo" in cli_env.read_text()  # score row written
+    invocations = stub.invocations()  # type: ignore[attr-defined]
+    assert any(call[1:2] == ["new-session"] for call in invocations), invocations
+    assert any(call[:4] == ["tmux", "switch-client", "-t", "$42"] for call in invocations), invocations
+
+
+def test_cli_manage_enter_on_session_switches_client(
+    cli_env: Path,
+    tmux_stub: Callable[..., object],
+    fzf_stub: object,
+) -> None:
+    """Enter on an ``s`` row maps directly to ``tmux switch-client -t $sid``."""
+    stub = tmux_stub(sessions="alpha\t$3\t/p/alpha")
+    fzf_stub.respond("\ns\t3\talpha\talpha")  # type: ignore[attr-defined]
+
+    rc = main(["sessions", "manage"])
+    assert rc == 0
+
+    invocations = stub.invocations()  # type: ignore[attr-defined]
+    assert any(call[:4] == ["tmux", "switch-client", "-t", "$3"] for call in invocations), invocations
+
+
+def test_cli_manage_enter_on_new_sentinel_prompts_for_name_and_creates(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+    fzf_stub: object,
+) -> None:
+    """Enter on the ``n`` sentinel calls ``prompt_new_session_name``
+    (a second fzf call) then bumps + switches into the typed name."""
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setenv("TWS_PROJECTS_DIRS", str(projects_dir))
+    stub = tmux_stub(sessions="", new_id="$77")
+    # Call 1: picker → Enter on the new-session sentinel.
+    fzf_stub.respond("\nn\t\tnew session\tnew session")  # type: ignore[attr-defined]
+    # Call 2: name prompt → returns the typed query then a blank expect-key
+    # line (fzf prints two lines under ``--print-query --expect ctrl-bs``).
+    fzf_stub.respond("shiny\n")  # type: ignore[attr-defined]
+
+    rc = main(["sessions", "manage"])
+    assert rc == 0
+
+    assert "shiny" in cli_env.read_text()
+    invocations = stub.invocations()  # type: ignore[attr-defined]
+    assert any(
+        call[1:6] == ["new-session", "-c", str(tmp_path), "-s", "shiny"] for call in invocations
+    ), invocations
+
+
+def test_cli_worktree_manage_existing_branch_creates_worktree_and_switches(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
+    tmux_stub: Callable[..., object],
+    fzf_stub: object,
+    make_repo: Callable[..., Path],
+    touch_fetch_head: Callable[[Path], None],
+) -> None:
+    """Picking an existing branch in the worktree picker creates a real
+    linked worktree and switches into it. Covers ``open_worktree_picker``,
+    ``_add_worktree_for_choice``, and ``bump_score_and_switch``."""
+    repo = make_repo("r", branches=("main", "feature"), with_remote=True)
+    touch_fetch_head(repo)
+    monkeypatch.setenv("TMUX_STUB_PANE_PATH", str(repo))
+    stub = tmux_stub(sessions="", new_id="$88")
+    # pick_branch's picker returns Enter on the "feature" row. Field 0 is
+    # the branch name; the rest of the line is ignored by the dispatcher.
+    fzf_stub.respond("\nfeature\trest")  # type: ignore[attr-defined]
+
+    rc = main(["worktree", "manage"])
+    assert rc == 0
+
+    # Worktree was created under the configured subfolder layout.
+    assert (repo / ".worktrees" / "feature").is_dir()
+    invocations = stub.invocations()  # type: ignore[attr-defined]
+    assert any(call[1:2] == ["new-session"] for call in invocations), invocations
+    assert any(call[:4] == ["tmux", "switch-client", "-t", "$88"] for call in invocations), invocations
+
+
+def test_cli_action_ctrl_r_worktree_renames_branch_and_rebuilds_tmpfile(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+    fzf_stub: object,
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    entries_file: Callable[[str], Path],
+) -> None:
+    """ctrl-r on a project row that IS a linked worktree renames the
+    branch + directory + repairs git, then rewrites the tmpfile from
+    ``build_session_entries_iter``. Covers ``_rename_worktree_action``."""
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setenv("TWS_PROJECTS_DIRS", str(projects_dir))
+    repo = make_repo("projects/repo", with_remote=True)
+    feature_path = repo / ".worktrees" / "feature"
+    worktree_add(repo, feature_path, "feature", new_branch=True)
+    tmux_stub()
+    fzf_stub.respond("renamed\n")  # type: ignore[attr-defined]
+    tmpfile = entries_file(f"p\t{feature_path}\tfeature\tfeature\n")
+
+    rc = main(["_internal", "session-action", "ctrl-r", "p", str(feature_path), str(tmpfile)])
+    assert rc == 0
+
+    # The branch+directory was actually renamed on disk.
+    assert not feature_path.exists()
+    assert (repo / ".worktrees" / "renamed").is_dir()
+    # The tmpfile was rebuilt — the old row is gone.
+    assert "feature" not in tmpfile.read_text() or "renamed" in tmpfile.read_text()
+
+
+# ── Dispatcher edge cases ─────────────────────────────────────────────────────
+
+
+def test_main_no_command_returns_exit_1(capsys: pytest.CaptureFixture[str]) -> None:
+    """``main([])`` lands on a parser with no handler → prints usage, exits 1."""
+    rc = main([])
+    assert rc == 1
+    assert "usage" in capsys.readouterr().err.lower()

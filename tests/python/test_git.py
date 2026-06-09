@@ -78,13 +78,11 @@ def test_resolve_remote_falls_back_to_first_remote_when_origin_absent(
         ["git", "init", "-q", "--bare", "-b", "main", str(upstream)],
         check=True,
         capture_output=True,
-        text=True,
     )
     subprocess.run(
         ["git", "-C", str(repo), "remote", "add", "upstream", str(upstream)],
         check=True,
         capture_output=True,
-        text=True,
     )
     assert resolve_remote(repo) == "upstream"
 
@@ -112,27 +110,10 @@ def test_default_branch_returns_none_when_remote_head_unset(
 
 def test_list_branches_local_plus_remote_only_with_origin_prefix(
     make_repo: Callable[..., Path],
+    make_remote_only_branch: Callable[[Path, str], None],
 ) -> None:
     repo = make_repo("r", branches=("main", "feature"), with_remote=True)
-    main_sha = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "main"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo),
-            "update-ref",
-            "refs/remotes/origin/server-only",
-            main_sha,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    make_remote_only_branch(repo, "server-only")
 
     branches = list_branches(repo)
 
@@ -167,15 +148,13 @@ def test_list_worktrees_main_only(make_repo: Callable[..., Path]) -> None:
     assert worktrees[0].path == repo
 
 
-def test_list_worktrees_lists_multiple(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_list_worktrees_lists_multiple(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
     repo = make_repo("r")
-    feature_path = tmp_path / "feature"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(feature_path)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    worktree_add(repo, tmp_path / "feature", "feature", new_branch=True)
     branches = {wt.branch for wt in list_worktrees(repo)}
     assert "main" in branches
     assert "feature" in branches
@@ -223,18 +202,15 @@ def test_add_worktree_checks_out_existing_local_branch(make_repo: Callable[..., 
 
 
 def test_add_worktree_returns_existing_path_when_branch_already_checked_out(
-    make_repo: Callable[..., Path], tmp_path: Path
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
 ) -> None:
     repo = make_repo("r", branches=("main", "feature"), with_remote=True)
     container = tmp_path / "container"
     container.mkdir()
     existing = container / "feature"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", str(existing), "feature"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    worktree_add(repo, existing, "feature")
 
     path = add_worktree(
         repo,
@@ -247,27 +223,13 @@ def test_add_worktree_returns_existing_path_when_branch_already_checked_out(
     assert path == existing
 
 
-def test_add_worktree_remote_only_creates_tracking_branch(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_add_worktree_remote_only_creates_tracking_branch(
+    make_repo: Callable[..., Path],
+    make_remote_only_branch: Callable[[Path, str], None],
+    tmp_path: Path,
+) -> None:
     repo = make_repo("r", with_remote=True)
-    main_sha = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "main"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo),
-            "update-ref",
-            "refs/remotes/origin/remote-only",
-            main_sha,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    make_remote_only_branch(repo, "remote-only")
     container = tmp_path / "container"
     container.mkdir()
 
@@ -289,35 +251,26 @@ def test_add_worktree_remote_only_creates_tracking_branch(make_repo: Callable[..
     assert head == "remote-only"
 
 
-def test_list_worktrees_marks_detached_head(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_list_worktrees_marks_detached_head(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
     repo = make_repo("r")
-    sha = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    det_path = tmp_path / "det"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "--detach", str(det_path), sha],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    worktree_add(repo, tmp_path / "det", detach=True)
     branches = [wt.branch for wt in list_worktrees(repo)]
     assert "(detached)" in branches
 
 
-def test_rename_worktree_renames_branch_moves_dir_and_repairs(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_rename_worktree_renames_branch_moves_dir_and_repairs(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
     repo = make_repo("r", branches=("main", "feature"))
     container = tmp_path
     feature_path = container / "feature"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", str(feature_path), "feature"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    worktree_add(repo, feature_path, "feature")
 
     new_path = rename_worktree(repo, container, feature_path, new_name="renamed-feature")
 
@@ -333,36 +286,28 @@ def test_rename_worktree_renames_branch_moves_dir_and_repairs(make_repo: Callabl
     assert head == "renamed-feature"
 
 
-def test_rename_worktree_detached_head_raises(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_rename_worktree_detached_head_raises(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
     repo = make_repo("r")
-    sha = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
     det_path = tmp_path / "det"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "--detach", str(det_path), sha],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    worktree_add(repo, det_path, detach=True)
 
     with pytest.raises(RuntimeError, match="detached HEAD"):
         rename_worktree(repo, tmp_path, det_path, new_name="anything")
 
 
-def test_rename_worktree_destination_exists_raises(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_rename_worktree_destination_exists_raises(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
     repo = make_repo("r", branches=("main", "feature"))
     container = tmp_path
     feature_path = container / "feature"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", str(feature_path), "feature"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    worktree_add(repo, feature_path, "feature")
     blocker = container / "renamed"
     blocker.mkdir()
 
@@ -458,15 +403,14 @@ def test_is_linked_worktree_false_for_main_checkout(make_repo: Callable[..., Pat
     assert is_linked_worktree(repo) is False
 
 
-def test_is_linked_worktree_true_for_linked_worktree(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_is_linked_worktree_true_for_linked_worktree(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
     repo = make_repo("r")
     wt = tmp_path / "wt" / "feature"
-    wt.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(wt)],
-        check=True,
-        capture_output=True,
-    )
+    worktree_add(repo, wt, "feature", new_branch=True)
     assert is_linked_worktree(wt) is True
 
 
@@ -476,15 +420,14 @@ def test_is_linked_worktree_false_outside_a_repo(tmp_path: Path) -> None:
     assert is_linked_worktree(plain) is False
 
 
-def test_main_worktree_returns_main_checkout_path(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_main_worktree_returns_main_checkout_path(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
     repo = make_repo("r")
     wt = tmp_path / "wt" / "feature"
-    wt.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(wt)],
-        check=True,
-        capture_output=True,
-    )
+    worktree_add(repo, wt, "feature", new_branch=True)
     # Asking from either the main checkout or a linked worktree must
     # both resolve back to the main checkout's path.
     assert main_worktree(repo) == repo
@@ -502,66 +445,47 @@ def test_detect_layout_no_linked_worktrees_is_ambiguous(make_repo: Callable[...,
     assert detect_layout(repo, worktrees_dir=".worktrees") == "ambiguous"
 
 
-def test_detect_layout_sibling_when_linked_is_sibling_of_main(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_detect_layout_sibling_when_linked_is_sibling_of_main(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
     # Layout: tmp/r-container/{main, feature}; main_worktree is under r-container
     container = tmp_path / "r-container"
     container.mkdir()
     repo = make_repo("r-container/main")
-    feature = container / "feature"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(feature)],
-        check=True,
-        capture_output=True,
-    )
+    worktree_add(repo, container / "feature", "feature", new_branch=True)
     assert detect_layout(repo, worktrees_dir=".worktrees") == "sibling"
 
 
 def test_detect_layout_subfolder_when_linked_is_under_worktrees_dir(
     make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
 ) -> None:
     repo = make_repo("r")
-    sub = repo / ".worktrees"
-    sub.mkdir()
-    feature = sub / "feature"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(feature)],
-        check=True,
-        capture_output=True,
-    )
+    worktree_add(repo, repo / ".worktrees" / "feature", "feature", new_branch=True)
     assert detect_layout(repo, worktrees_dir=".worktrees") == "subfolder"
 
 
-def test_detect_layout_honours_custom_worktrees_dir(make_repo: Callable[..., Path]) -> None:
+def test_detect_layout_honours_custom_worktrees_dir(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+) -> None:
     repo = make_repo("r")
-    sub = repo / "trees"
-    sub.mkdir()
-    feature = sub / "feature"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(feature)],
-        check=True,
-        capture_output=True,
-    )
+    worktree_add(repo, repo / "trees" / "feature", "feature", new_branch=True)
     assert detect_layout(repo, worktrees_dir="trees") == "subfolder"
     # The same repo with a different worktrees_dir is no longer recognized as subfolder.
     assert detect_layout(repo, worktrees_dir=".worktrees") == "ambiguous"
 
 
-def test_detect_layout_mixed_paths_is_ambiguous(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_detect_layout_mixed_paths_is_ambiguous(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
     repo = make_repo("r")
-    sub = repo / ".worktrees"
-    sub.mkdir()
-    inside = sub / "inside"
-    outside = tmp_path / "outside"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "inside", str(inside)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "outside", str(outside)],
-        check=True,
-        capture_output=True,
-    )
+    worktree_add(repo, repo / ".worktrees" / "inside", "inside", new_branch=True)
+    worktree_add(repo, tmp_path / "outside", "outside", new_branch=True)
     assert detect_layout(repo, worktrees_dir=".worktrees") == "ambiguous"
 
 
@@ -608,16 +532,12 @@ def test_add_worktree_places_into_subfolder_container(
 
 def test_rename_worktree_in_subfolder_layout(
     make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
 ) -> None:
     repo = make_repo("r", branches=("main", "feature"))
     container = repo / ".worktrees"
-    container.mkdir()
     feature_path = container / "feature"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", str(feature_path), "feature"],
-        check=True,
-        capture_output=True,
-    )
+    worktree_add(repo, feature_path, "feature")
 
     new_path = rename_worktree(repo, container, feature_path, new_name="renamed")
 
@@ -631,20 +551,14 @@ def test_current_branch_returns_branch_name(make_repo: Callable[..., Path]) -> N
     assert current_branch(repo) == "main"
 
 
-def test_current_branch_returns_none_for_detached_head(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_current_branch_returns_none_for_detached_head(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
     repo = make_repo("r")
-    sha = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
     det = tmp_path / "det"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "--detach", str(det), sha],
-        check=True,
-        capture_output=True,
-    )
+    worktree_add(repo, det, detach=True)
     assert current_branch(det) is None
 
 
@@ -673,7 +587,11 @@ def test_fetch_head_mtime_returns_mtime_after_fetch(
     assert mtime > 0
 
 
-def test_fetch_head_mtime_resolves_through_linked_worktree(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_fetch_head_mtime_resolves_through_linked_worktree(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
     repo = make_repo("r", with_remote=True)
     subprocess.run(
         ["git", "-C", str(repo), "fetch", "--quiet", "origin"],
@@ -681,11 +599,7 @@ def test_fetch_head_mtime_resolves_through_linked_worktree(make_repo: Callable[.
         capture_output=True,
     )
     wt = tmp_path / "feature"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(wt)],
-        check=True,
-        capture_output=True,
-    )
+    worktree_add(repo, wt, "feature", new_branch=True)
     assert fetch_head_mtime(wt) is not None
 
 
@@ -708,14 +622,14 @@ def test_fetch_all_returns_false_when_repo_has_no_remote(make_repo: Callable[...
     assert fetch_all(repo) in (True, False)
 
 
-def test_worktree_remove_drops_linked_worktree(make_repo: Callable[..., Path], tmp_path: Path) -> None:
+def test_worktree_remove_drops_linked_worktree(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
     repo = make_repo("r")
     wt = tmp_path / "feature"
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "feature", str(wt)],
-        check=True,
-        capture_output=True,
-    )
+    worktree_add(repo, wt, "feature", new_branch=True)
     assert wt.is_dir()
 
     worktree_remove(repo, wt)
