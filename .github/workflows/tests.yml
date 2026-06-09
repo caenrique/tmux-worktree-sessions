@@ -25,12 +25,20 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install shellcheck
+      # Runtime deps the plugin shells out to during tests: fd is invoked by
+      # git.list_git_projects; tmux and fzf are touched by integration tests.
+      # Plus shellcheck for the bash entry point. devenv.nix provides these
+      # in the local shell; CI installs them directly.
+      - name: Install runtime deps
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            sudo apt-get update && sudo apt-get install -y shellcheck
+            sudo apt-get update
+            sudo apt-get install -y shellcheck fd-find tmux fzf
+            # Ubuntu ships fd as `fdfind` to avoid clashing with chronyc; the
+            # plugin invokes it as `fd`, so expose it under that name.
+            sudo ln -s "$(command -v fdfind)" /usr/local/bin/fd
           else
-            brew install shellcheck
+            brew install shellcheck fd tmux fzf
           fi
 
       - run: uv sync
