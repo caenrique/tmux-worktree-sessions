@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from . import git, score, text, tmux
-from .picker import IconSet
+from .icons import IconSet
 
 # Catppuccin Mocha colours used to highlight session rows in
 # build_entries and the ctrl-r session-rename action.

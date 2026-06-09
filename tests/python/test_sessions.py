@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 from tmux_worktree_sessions.__main__ import main
-from tmux_worktree_sessions.picker import IconSet
+from tmux_worktree_sessions.icons import IconSet
 from tmux_worktree_sessions.sessions import (
     apply_ctrl_r_session_rename,
     apply_ctrl_x,
@@ -314,7 +314,7 @@ def test_cli_action_ctrl_x_rewrites_tmpfile(
     tmpfile = tmp_path / "entries"
     tmpfile.write_text("s\t3\talpha\talpha\np\t/p/other\tother\tother\nn\t\tnew session\tnew session\n")
 
-    rc = main(["sessions", "action", "ctrl-x", "s", "3", str(tmpfile)])
+    rc = main(["_internal", "session-action", "ctrl-x", "s", "3", str(tmpfile)])
     assert rc == 0
 
     out = tmpfile.read_text().splitlines()
@@ -336,7 +336,7 @@ def test_cli_action_ctrl_x_non_session_is_noop(
     before = "p\t/p/foo\tfoo\tfoo\n"
     tmpfile.write_text(before)
 
-    rc = main(["sessions", "action", "ctrl-x", "p", "/p/foo", str(tmpfile)])
+    rc = main(["_internal", "session-action", "ctrl-x", "p", "/p/foo", str(tmpfile)])
     assert rc == 0
     assert tmpfile.read_text() == before
 
@@ -524,7 +524,7 @@ def test_cli_action_ctrl_r_session_non_worktree_calls_tmux_rename(
     tmpfile = tmp_path / "entries"
     tmpfile.write_text("s\t3\talpha\talpha\n")
 
-    rc = main(["sessions", "action", "ctrl-r", "s", "3", str(tmpfile)])
+    rc = main(["_internal", "session-action", "ctrl-r", "s", "3", str(tmpfile)])
     assert rc == 0
 
     invocations = stub.invocations()  # type: ignore[attr-defined]
@@ -545,7 +545,7 @@ def test_cli_action_ctrl_r_project_non_worktree_displays_warning(
     tmpfile = tmp_path / "entries"
     tmpfile.write_text(f"p\t{plain}\tplain\tplain\n")
 
-    rc = main(["sessions", "action", "ctrl-r", "p", str(plain), str(tmpfile)])
+    rc = main(["_internal", "session-action", "ctrl-r", "p", str(plain), str(tmpfile)])
     assert rc == 0
 
     invocations = stub.invocations()  # type: ignore[attr-defined]
@@ -608,7 +608,7 @@ def test_cli_action_ctrl_d_session_with_worktree_kills_and_removes(
     tmpfile = tmp_path / "entries"
     tmpfile.write_text("s\t5\tfeature\tfeature\np\t/other/proj\tother\tother\n")
 
-    rc = main(["sessions", "action", "ctrl-d", "s", "5", str(tmpfile)])
+    rc = main(["_internal", "session-action", "ctrl-d", "s", "5", str(tmpfile)])
     assert rc == 0
 
     out = tmpfile.read_text()
@@ -631,7 +631,7 @@ def test_cli_action_ctrl_d_session_only_path_kills_and_strips(
     tmpfile = tmp_path / "entries"
     tmpfile.write_text("s\t7\tplain\tplain\np\t/other/proj\tother\tother\n")
 
-    rc = main(["sessions", "action", "ctrl-d", "s", "7", str(tmpfile)])
+    rc = main(["_internal", "session-action", "ctrl-d", "s", "7", str(tmpfile)])
     assert rc == 0
 
     out = tmpfile.read_text()
@@ -653,7 +653,7 @@ def test_cli_action_ctrl_d_project_linked_worktree_removes(
     tmpfile = tmp_path / "entries"
     tmpfile.write_text(f"p\t{wt}\tfeature\tfeature\np\t/other/proj\tother\tother\n")
 
-    rc = main(["sessions", "action", "ctrl-d", "p", str(wt), str(tmpfile)])
+    rc = main(["_internal", "session-action", "ctrl-d", "p", str(wt), str(tmpfile)])
     assert rc == 0
 
     out = tmpfile.read_text()
@@ -676,7 +676,7 @@ def test_cli_action_ctrl_d_orphan_dir_yes_deletes(
     tmpfile = tmp_path / "entries"
     tmpfile.write_text(f"p\t{orphan}\torphan\torphan\np\t/other\tother\tother\n")
 
-    rc = main(["sessions", "action", "ctrl-d", "p", str(orphan), str(tmpfile)])
+    rc = main(["_internal", "session-action", "ctrl-d", "p", str(orphan), str(tmpfile)])
     assert rc == 0
 
     out = tmpfile.read_text()
@@ -698,7 +698,7 @@ def test_cli_action_ctrl_d_orphan_dir_no_keeps(
     tmpfile = tmp_path / "entries"
     tmpfile.write_text(f"p\t{orphan}\torphan\torphan\n")
 
-    rc = main(["sessions", "action", "ctrl-d", "p", str(orphan), str(tmpfile)])
+    rc = main(["_internal", "session-action", "ctrl-d", "p", str(orphan), str(tmpfile)])
     assert rc == 0
 
     assert orphan.exists()
@@ -717,7 +717,7 @@ def test_cli_action_ctrl_d_non_orphan_non_worktree_displays_message(
     tmpfile = tmp_path / "entries"
     tmpfile.write_text(f"p\t{notes}\tnotes\tnotes\n")
 
-    rc = main(["sessions", "action", "ctrl-d", "p", str(notes), str(tmpfile)])
+    rc = main(["_internal", "session-action", "ctrl-d", "p", str(notes), str(tmpfile)])
     assert rc == 0
 
     assert notes.exists()

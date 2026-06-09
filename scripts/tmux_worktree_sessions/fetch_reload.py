@@ -17,7 +17,8 @@ import threading
 from pathlib import Path
 
 from . import curl, git
-from .picker import IconSet, gen_branch_picker_entries
+from .icons import IconSet
+from .picker import gen_branch_picker_entries
 
 _SPIN_FRAMES: str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 _SPIN_INITIAL_DELAY_S: float = 0.3

@@ -12,9 +12,9 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from tmux_worktree_sessions.icons import IconSet
 from tmux_worktree_sessions.picker import (
     BranchChoice,
-    IconSet,
     gen_branch_picker_entries,
     pick_branch,
 )

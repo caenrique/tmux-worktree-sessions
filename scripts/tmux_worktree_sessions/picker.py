@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import secrets
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -31,16 +32,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import fzf, git, score, text, tmux
+from . import fzf, git, score, sessions, text, tmux
 from .icons import IconSet
 
 if TYPE_CHECKING:
     from .config import Config
-
-# Re-exported aliases preserved so existing callers (``__main__``,
-# tests, downstream importers) keep working after the fzf module split.
-FZF_INLINE_FLAGS: tuple[str, ...] = fzf.INLINE_FLAGS
-FZF_POPUP_FLAGS: tuple[str, ...] = fzf.POPUP_FLAGS
 
 # Truecolor SGR matching the fzf header colour (#6c7086) so the
 # worktree-path suffix in the branch picker reads as a secondary detail
@@ -72,23 +68,22 @@ _LISTEN_PORT_BASE = 51200
 _LISTEN_PORT_RANGE = 14336
 
 
-# Re-export ``IconSet`` from its new home so existing imports keep
-# working (``from tmux_worktree_sessions.picker import IconSet``).
 __all__ = [
-    "IconSet",
     "BranchChoice",
-    "FZF_INLINE_FLAGS",
-    "FZF_POPUP_FLAGS",
     "BOLD",
     "GRAY",
     "GREEN",
     "RESET",
+    "build_session_entries_iter",
     "bump_score_and_switch",
     "confirm_orphan_delete",
     "fetch_reload_argv",
     "gen_branch_picker_entries",
     "open_worktree_picker",
     "pick_branch",
+    "picker_action_ctrl_d",
+    "picker_action_ctrl_r",
+    "picker_action_ctrl_x",
     "prompt_new_session_name",
     "prompt_rename",
     "resolve_worktree_container",
@@ -266,9 +261,10 @@ def fetch_reload_argv() -> list[str]:
 
     Used both by :func:`pick_branch` (initial sync) and the ``ctrl-f``
     rebind. Centralised here so the venv interpreter is shared by every
-    spawn site.
+    spawn site. Targets the internal ``_internal fetch-reload`` hatch —
+    the picker calling back into itself.
     """
-    return [sys.executable, "-m", "tmux_worktree_sessions", "fetch-reload"]
+    return [sys.executable, "-m", "tmux_worktree_sessions", "_internal", "fetch-reload"]
 
 
 def _seed_branch_tmpfile(
@@ -630,14 +626,17 @@ def _build_session_picker(tmpfile: Path) -> fzf.Picker:
 def _build_session_action_binds(tmpfile: Path) -> tuple[str, str, str]:
     """Build the ctrl-d / ctrl-x / ctrl-r binds that re-invoke the dispatcher.
 
-    Each bind shells out to ``python3 -m tmux_worktree_sessions sessions
-    action <name>``; using ``sys.executable`` keeps the venv's
-    interpreter active in the subshell fzf spawns. The inline
-    ``{1}/{2}/{n}`` placeholders are interpolated by fzf at runtime; the
-    rest of the command line is escaped so paths with spaces survive
-    fzf's shell-style ``execute()``.
+    Each bind shells out to ``python3 -m tmux_worktree_sessions _internal
+    session-action <key>`` — the internal hatch the picker uses to call
+    back into itself. ``sys.executable`` keeps the venv's interpreter
+    active in the subshell fzf spawns. The inline ``{1}/{2}/{n}``
+    placeholders are interpolated by fzf at runtime; the rest of the
+    command line is escaped so paths with spaces survive fzf's
+    shell-style ``execute()``.
     """
-    action_cmd_prefix = f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions sessions action "
+    action_cmd_prefix = (
+        f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions _internal session-action "
+    )
     quoted_tmpfile = shlex.quote(str(tmpfile))
 
     def _bind(key: str, exec_form: str) -> str:
@@ -697,3 +696,192 @@ def _resolve_ctrl_w_repo(*, row_type: str, key2: str) -> Path | None:
         sess_path = tmux.session_path(f"${key2}")
         return git.toplevel(Path(sess_path)) if sess_path else None
     return None
+
+
+# ---------------------------------------------------------------------------
+# CLI action handlers (``picker_action_*``)
+#
+# Reached only via the ``_internal session-action <key>`` subcommand,
+# which fzf's ctrl-x / ctrl-r / ctrl-d binds inside the session picker
+# spawn (see ``_build_session_action_binds``). Each one mutates the
+# picker's shared entries tmpfile in place so the fzf ``reload(cat ...)``
+# rebind pulls the fresh row set on return. The ``picker_action_*``
+# prefix marks the functions the CLI hatch dispatches to — keep them
+# grouped so the boundary stays obvious.
+# ---------------------------------------------------------------------------
+
+
+def _read_text_or_empty(path: Path) -> str:
+    try:
+        return path.read_text()
+    except FileNotFoundError:
+        return ""
+
+
+def build_session_entries_iter(cfg: Config) -> Iterator[str]:
+    """Drive ``sessions.build_entries`` from a resolved ``Config``.
+
+    Reads the score file fresh on every call — picker actions can leave
+    it out of date with the in-memory tmpfile.
+    """
+    score_entries = score.parse_score_table(_read_text_or_empty(cfg.score_file))
+    return sessions.build_entries(
+        home=cfg.home,
+        strip_prefixes=cfg.strip_prefixes,
+        projects_roots=cfg.projects_roots,
+        max_depth=cfg.max_depth,
+        manual_spec=cfg.manual_spec,
+        icons=cfg.icons,
+        score_entries=score_entries,
+        now=time.time(),
+        half_life_secs=cfg.half_life_secs,
+        path_boost=cfg.path_boost,
+        worktrees_dir=cfg.worktrees_dir,
+    )
+
+
+def picker_action_ctrl_x(*, row_type: str, row_id: str, tmpfile: Path, cfg: Config) -> int:
+    """Kill the tmux session and convert its row to a project row."""
+    if row_type != "s":
+        return 0
+    tmux_id = f"${row_id}"
+    sess_path = tmux.session_path(tmux_id)
+    tmux.kill_session(tmux_id)
+
+    lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+    new_lines = sessions.apply_ctrl_x(lines, sid=row_id, sess_path=sess_path, icons=cfg.icons)
+    tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+    return 0
+
+
+def picker_action_ctrl_r(*, row_type: str, row_id: str, tmpfile: Path, cfg: Config) -> int:
+    """Rename a worktree (branch+dir+repair) or a tmux session in place."""
+    target_path = _resolve_action_target(row_type, row_id)
+    if target_path is None:
+        return 0
+
+    target = Path(target_path)
+    if git.is_linked_worktree(target):
+        return _rename_worktree_action(target, target_path, tmpfile, cfg=cfg)
+
+    if row_type == "s":
+        return _rename_session_action(row_id, tmpfile, cfg=cfg)
+
+    tmux.flash_message("ctrl-r: not a linked worktree")
+    return 0
+
+
+def picker_action_ctrl_d(*, row_type: str, row_id: str, tmpfile: Path, cfg: Config) -> int:
+    """Kill a session and/or remove its worktree; prompt on orphaned dirs."""
+    del cfg  # accepted for handler symmetry; ctrl-d does not consume config
+    if row_type == "s":
+        return _ctrl_d_session_row(row_id, tmpfile)
+    if row_type == "p":
+        return _ctrl_d_project_row(row_id, tmpfile)
+    return 0
+
+
+def _resolve_action_target(row_type: str, row_id: str) -> str | None:
+    """Return the filesystem target of a ctrl-r/ctrl-d action row, or None."""
+    if row_type == "s":
+        return tmux.session_path(f"${row_id}")
+    if row_type == "p":
+        return row_id
+    return None
+
+
+def _rename_worktree_action(target: Path, target_path: str, tmpfile: Path, *, cfg: Config) -> int:
+    """Branch+directory rename for a linked worktree row; rebuild tmpfile on success."""
+    main_wt = git.main_worktree(target)
+    if main_wt is None:
+        return 0
+    container = resolve_worktree_container(main_wt, main_wt, cfg=cfg)
+
+    old_branch = git.current_branch(target)
+    if not old_branch:
+        sys.stderr.write("Cannot rename: worktree is in detached HEAD state\n")
+        return 1
+    new_name = prompt_rename(old_branch)
+    if not new_name or new_name == old_branch:
+        return 0
+    try:
+        git.rename_worktree(main_wt, container, target, new_name=new_name)
+    except RuntimeError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+    rebuilt = list(build_session_entries_iter(cfg))
+    tmpfile.write_text("\n".join(rebuilt) + ("\n" if rebuilt else ""))
+    return 0
+
+
+def _rename_session_action(sid: str, tmpfile: Path, *, cfg: Config) -> int:
+    """Tmux ``rename-session`` for a session row; rewrite the tmpfile row in place."""
+    lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+    clean_name = _find_session_clean_name(lines, sid)
+    new_name = prompt_rename(clean_name)
+    if not new_name or new_name == clean_name:
+        return 0
+    tmux.rename_session(f"${sid}", new_name)
+    new_lines = sessions.apply_ctrl_r_session_rename(lines, sid=sid, new_name=new_name, icons=cfg.icons)
+    tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+    return 0
+
+
+def _find_session_clean_name(lines: list[str], sid: str) -> str:
+    """Pull the search column off the matching ``s\\t<sid>`` row, or empty string."""
+    for line in lines:
+        fields = line.split("\t")
+        if len(fields) >= 3 and fields[0] == "s" and fields[1] == sid:
+            return fields[2]
+    return ""
+
+
+def _ctrl_d_session_row(sid: str, tmpfile: Path) -> int:
+    """Kill the tmux session, drop its row, and remove its worktree if linked."""
+    tmux_id = f"${sid}"
+    sess_path = tmux.session_path(tmux_id)
+    tmux.kill_session(tmux_id)
+
+    lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+    new_lines = sessions.remove_session_row(lines, sid=sid)
+    tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+
+    sess = Path(sess_path)
+    if git.is_linked_worktree(sess):
+        wt_repo = git.toplevel(sess)
+        if wt_repo is not None:
+            git.worktree_remove(wt_repo, sess_path)
+    return 0
+
+
+def _ctrl_d_project_row(wt_path: str, tmpfile: Path) -> int:
+    """Drop the project row; remove its worktree (or an orphan dir after confirm)."""
+    wt = Path(wt_path)
+    if not git.is_linked_worktree(wt):
+        return _ctrl_d_orphan_or_flash(wt, wt_path, tmpfile)
+
+    wt_repo = git.toplevel(wt)
+    if wt_repo is None:
+        return 0
+    _drop_project_row(tmpfile, wt_path)
+    git.worktree_remove(wt_repo, wt_path)
+    return 0
+
+
+def _ctrl_d_orphan_or_flash(wt: Path, wt_path: str, tmpfile: Path) -> int:
+    """Either confirm-and-rmtree an orphan worktree, or flash an error."""
+    if not sessions.is_orphaned_worktree(wt, container=wt.parent):
+        tmux.flash_message("ctrl-d: not a linked worktree")
+        return 0
+    if not confirm_orphan_delete(wt_path):
+        return 0
+    _drop_project_row(tmpfile, wt_path)
+    shutil.rmtree(wt_path, ignore_errors=True)
+    return 0
+
+
+def _drop_project_row(tmpfile: Path, wt_path: str) -> None:
+    """Rewrite ``tmpfile`` with the project row for ``wt_path`` removed."""
+    lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+    new_lines = sessions.remove_project_row(lines, path=wt_path)
+    tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
