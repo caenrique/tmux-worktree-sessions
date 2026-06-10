@@ -27,6 +27,9 @@ def list_git_projects(roots: list[Path], *, max_depth: int) -> list[Path]:
     existing = [r for r in roots if r.is_dir()]
     if not existing:
         return []
+    # ``--format`` is only available in fd ≥ 10.0; Ubuntu apt still ships
+    # fd 9.x. Print the matched ``.git`` entries and strip the trailing
+    # component in Python so the call works on every supported fd.
     cmd = [
         "fd",
         "--hidden",  # search hidden entries; .git starts with a dot
@@ -37,8 +40,6 @@ def list_git_projects(roots: list[Path], *, max_depth: int) -> list[Path]:
         "file",  # also match linked worktrees (.git as a file)
         f"--max-depth={max_depth}",  # bound the descent depth
         "--prune",  # don't descend into a directory once it matches
-        "--format",
-        "{//}",  # print the parent dir (the repo) instead of the .git entry
         "--exclude",
         "node_modules",  # skip noisy dependency trees
         *(str(r) for r in existing),
@@ -49,7 +50,7 @@ def list_git_projects(roots: list[Path], *, max_depth: int) -> list[Path]:
     for line in result.stdout.splitlines():
         if not line:
             continue
-        path = Path(line)
+        path = Path(line).parent
         if path not in seen:
             seen.add(path)
             projects.append(path)
