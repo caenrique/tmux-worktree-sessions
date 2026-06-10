@@ -1,0 +1,64 @@
+name: demo
+
+# Render demo/readme.tape and upload the resulting GIF to the
+# `demo-assets` GitHub release. The README links to that release URL,
+# so this workflow is what keeps the embedded demo in sync with the
+# tape source.
+#
+# Triggers:
+#   - workflow_dispatch       — manual re-render from any branch
+#   - push to main (demo/**)  — auto re-render when demo source changes
+#   - pull_request (demo/**)  — render-only smoke check (no publish)
+#
+# Linux-only: VHS runs headless on ubuntu-latest. macOS rendering
+# would just bloat CI minutes — the GIF is platform-independent.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - demo/**
+      - .github/workflows/demo.yml
+  pull_request:
+    paths:
+      - demo/**
+      - .github/workflows/demo.yml
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed by `gh release upload` in demo/publish.sh.
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+
+      - uses: cachix/cachix-action@v16
+        with:
+          name: devenv
+
+      - name: Install devenv
+        run: nix profile add nixpkgs#devenv
+
+      - name: Render demo GIF
+        run: devenv tasks run demo:render
+
+      # Always upload as a workflow artifact so PRs can preview the
+      # rendered output without publishing.
+      - name: Upload GIF as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: readme-gif
+          path: /tmp/tws-demo/readme.gif
+          if-no-files-found: error
+
+      # Only publish on push-to-main and manual dispatch. Pull
+      # requests stop at the artifact above.
+      - name: Publish to GitHub release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash demo/publish.sh
