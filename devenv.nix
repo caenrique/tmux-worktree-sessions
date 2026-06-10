@@ -57,11 +57,14 @@
     "demo:render" = {
       exec = "bash demo/setup.sh && vhs demo/readme.tape";
     };
-    # One-shot for the maintainer: render the GIF locally and publish
-    # it to the `demo-assets` GitHub release the README links to.
+    # Publish the rendered GIF to the `demo-assets` GitHub release the
+    # README links to. By default `demo:render` runs first via the
+    # `after` dependency; pass `--mode single` to publish whatever is
+    # already at /tmp/tws-demo/readme.gif without re-rendering.
     # Requires `gh` to be authenticated against github.com.
     "demo:release" = {
-      exec = "bash demo/setup.sh && vhs demo/readme.tape && bash demo/publish.sh";
+      exec = "bash demo/publish.sh";
+      after = [ "demo:render" ];
     };
   };
 
