@@ -11,6 +11,7 @@
     pkgs.fzf
     pkgs.fd
     pkgs.shellcheck
+    pkgs.vhs
   ];
 
   # uv-driven Python dev environment. `sync.enable` runs `uv sync` on
@@ -52,6 +53,9 @@
     "shellcheck:lint" = {
       exec = "shellcheck --severity=warning tmux-worktree-sessions.tmux";
       before = [ "devenv:enterTest" ];
+    };
+    "demo:render" = {
+      exec = "bash demo/setup.sh && vhs demo/readme.tape";
     };
   };
 

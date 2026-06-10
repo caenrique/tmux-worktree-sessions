@@ -1,5 +1,7 @@
 # tmux-worktree-sessions
 
+![demo](https://github.com/caenrique/tmux-worktree-sessions/releases/download/demo-assets/readme.gif)
+
 A tmux plugin that gives you a unified fuzzy picker for sessions and git worktrees. Open any project, switch between running sessions, create and delete worktrees, and rename branches — all from a single keyboard shortcut, ranked by how recently you used them.
 
 ## What it does
