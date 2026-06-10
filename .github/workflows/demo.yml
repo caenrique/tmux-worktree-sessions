@@ -12,6 +12,14 @@ name: demo
 #
 # Linux-only: VHS runs headless on ubuntu-latest. macOS rendering
 # would just bloat CI minutes — the GIF is platform-independent.
+#
+# Temporary workaround (matches .github/workflows/tests.yml): install
+# runtime deps directly instead of via `devenv tasks run demo:render`.
+# Devenv-on-CI has been failing with sporadic `path '...' is not valid`
+# errors during shell evaluation, caused by a Nix garbage-collector
+# race fixed in NixOS/nix#15992 (merged 2026-06-07) but not yet in any
+# Nix release. Once a Nix release containing the fix ships, revert to
+# the devenv-based flow.
 
 on:
   workflow_dispatch:
@@ -34,17 +42,24 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: cachix/install-nix-action@v31
-
-      - uses: cachix/cachix-action@v16
-        with:
-          name: devenv
-
-      - name: Install devenv
-        run: nix profile add nixpkgs#devenv
+      # Runtime deps the demo shells out to: tmux/fzf/fd/git for the
+      # plugin under test, ffmpeg for VHS encoding, plus VHS itself
+      # (and ttyd, which VHS drives) from the charmbracelet apt repo.
+      - name: Install runtime deps
+        run: |
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://repo.charm.sh/apt/gpg.key \
+            | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" \
+            | sudo tee /etc/apt/sources.list.d/charm.list
+          sudo apt-get update
+          sudo apt-get install -y tmux fzf fd-find ffmpeg vhs ttyd
+          # Ubuntu ships fd as `fdfind` to avoid clashing with chronyc;
+          # the plugin invokes it as `fd`, so expose it under that name.
+          sudo ln -s "$(command -v fdfind)" /usr/local/bin/fd
 
       - name: Render demo GIF
-        run: devenv tasks run demo:render
+        run: bash demo/setup.sh && vhs demo/readme.tape
 
       # Always upload as a workflow artifact so PRs can preview the
       # rendered output without publishing.
