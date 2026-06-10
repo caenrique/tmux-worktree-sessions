@@ -21,19 +21,22 @@ fi
 unset GH_HOST
 
 if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+  # `--prerelease` keeps this asset bucket out of GitHub's "Latest"
+  # promotion entirely. `make_latest=false` alone doesn't work: if no
+  # other non-prerelease release exists, GitHub still picks one by
+  # date and re-promotes this tag. Pre-releases are categorically
+  # excluded from latest, so the homepage falls back to whichever
+  # versioned tag actually qualifies (or none, if there are none).
   gh release create "$TAG" --repo "$REPO" \
     --title "Demo assets" \
-    --notes "Static assets referenced from the README. Not a versioned release."
+    --notes "Static assets referenced from the README. Not a versioned release." \
+    --prerelease
 fi
 
-# Always re-assert make_latest=false via the API. `gh release edit
-# --latest=false` is unreliable (the CLI sends nothing for the false
-# case in current gh versions), and the release would otherwise appear
-# as "Latest" on the repo homepage and shadow real versioned tags. The
-# REST field is a string "true"|"false"|"legacy", so use `-f` (raw
-# string), not `-F` (typed bool).
+# Re-assert prerelease on every publish so a release that was created
+# before this flag landed gets demoted on the next run. Idempotent.
 RELEASE_ID=$(gh api "repos/$REPO/releases/tags/$TAG" --jq .id)
-gh api -X PATCH "repos/$REPO/releases/$RELEASE_ID" -f make_latest=false >/dev/null
+gh api -X PATCH "repos/$REPO/releases/$RELEASE_ID" -F prerelease=true >/dev/null
 
 gh release upload "$TAG" "$GIF" --repo "$REPO" --clobber
 
