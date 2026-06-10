@@ -324,10 +324,14 @@ def add_worktree(
     When ``new_name`` is set, the new branch is created from
     ``<remote>/<default>`` if the repo has a remote, falling back to
     ``default_branch_fallback`` (usually ``main``) when the remote
-    HEAD is unset. When ``branch`` is set and a worktree already has
-    that branch checked out, the existing path is returned unchanged.
-    Remote-only branches (``<remote>/foo``) are checked out as a new
-    local branch ``foo`` that tracks the remote.
+    HEAD is unset. ``--no-track`` is passed so the new branch does not
+    inherit ``<remote>/<default>`` as its upstream — otherwise the
+    first ``git push`` from the worktree would fail because the
+    upstream name (``<default>``) does not match the local branch.
+    When ``branch`` is set and a worktree already has that branch
+    checked out, the existing path is returned unchanged. Remote-only
+    branches (``<remote>/foo``) are checked out as a new local branch
+    ``foo`` that tracks the remote.
 
     Git's progress messages stream to the caller's stderr; git's
     stdout is dropped so the returned path stays clean.
@@ -346,6 +350,7 @@ def add_worktree(
                 str(repo),
                 "worktree",
                 "add",
+                "--no-track",
                 "-b",
                 new_name,
                 str(worktree_path),
