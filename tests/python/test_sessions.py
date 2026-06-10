@@ -846,9 +846,7 @@ def test_cli_manage_enter_on_new_sentinel_prompts_for_name_and_creates(
 
     assert "shiny" in cli_env.read_text()
     invocations = stub.invocations()  # type: ignore[attr-defined]
-    assert any(
-        call[1:6] == ["new-session", "-c", str(tmp_path), "-s", "shiny"] for call in invocations
-    ), invocations
+    assert any(call[1:6] == ["new-session", "-c", str(tmp_path), "-s", "shiny"] for call in invocations), invocations
 
 
 def test_cli_worktree_manage_existing_branch_creates_worktree_and_switches(

@@ -634,9 +634,7 @@ def _build_session_action_binds(tmpfile: Path) -> tuple[str, str, str]:
     command line is escaped so paths with spaces survive fzf's
     shell-style ``execute()``.
     """
-    action_cmd_prefix = (
-        f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions _internal session-action "
-    )
+    action_cmd_prefix = f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions _internal session-action "
     quoted_tmpfile = shlex.quote(str(tmpfile))
 
     def _bind(key: str, exec_form: str) -> str:
