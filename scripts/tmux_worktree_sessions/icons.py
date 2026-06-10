@@ -42,7 +42,7 @@ class IconSet:
                 project="📦",
                 branch="🌱",
                 remote="☁️",
-                new="＋",
+                new="✨",
             )
         # default: nerd. Written as \\uXXXX escapes — the literal glyphs
         # were silently flattened to plain spaces during the bash → Python
