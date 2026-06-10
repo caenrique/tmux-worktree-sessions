@@ -38,11 +38,21 @@ def _run_tpm_entry(
     )
 
 
-def _bind_key_row(tmux_stub: TmuxStub) -> str:
+def _bind_key_row(tmux_stub: TmuxStub, key: str | None = None) -> str:
+    """Return a tab-joined bind-key invocation row.
+
+    With ``key=None`` returns the first bind-key invocation (back-compat
+    for the existing session-key tests). With ``key`` set, returns the
+    invocation that binds that key combo. ``-n`` lives at fields[2] in
+    the recorded TSV row, so the key combo is at fields[3].
+    """
     for fields in tmux_stub.invocations():
         if len(fields) >= 2 and fields[1] == "bind-key":
-            return "\t".join(fields)
-    raise AssertionError("no bind-key invocation recorded")
+            if key is None:
+                return "\t".join(fields)
+            if len(fields) >= 4 and fields[3] == key:
+                return "\t".join(fields)
+    raise AssertionError(f"no bind-key invocation recorded for key={key!r}")
 
 
 def test_binds_default_key(tmux_stub: Callable[..., TmuxStub]) -> None:
@@ -94,6 +104,64 @@ def test_invokes_python_dispatcher(tmux_stub: Callable[..., TmuxStub]) -> None:
     row = _bind_key_row(stub)
     assert f"PYTHONPATH='{_REPO_ROOT}/scripts'" in row
     assert "python3 -m tmux_worktree_sessions sessions manage" in row
+
+
+def test_forwards_default_worktrees_dir(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    _run_tpm_entry(stub, options="")
+    row = _bind_key_row(stub)
+    assert "TWS_WORKTREES_DIR='.worktrees'" in row
+
+
+def test_forwards_worktrees_dir_override(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    _run_tpm_entry(stub, options="@tws-worktrees-dir=trees")
+    row = _bind_key_row(stub)
+    assert "TWS_WORKTREES_DIR='trees'" in row
+
+
+def test_forwards_default_worktree_layout_default(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    _run_tpm_entry(stub, options="")
+    row = _bind_key_row(stub)
+    assert "TWS_DEFAULT_WORKTREE_LAYOUT='subfolder'" in row
+
+
+def test_forwards_default_worktree_layout_override(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    _run_tpm_entry(stub, options="@tws-default-worktree-layout=sibling")
+    row = _bind_key_row(stub)
+    assert "TWS_DEFAULT_WORKTREE_LAYOUT='sibling'" in row
+
+
+def test_binds_default_worktree_key(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    _run_tpm_entry(stub, options="")
+    row = _bind_key_row(stub, key="C-S-w")
+    assert "python3 -m tmux_worktree_sessions worktree manage" in row
+
+
+def test_honours_custom_worktree_key(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    _run_tpm_entry(stub, options="@tws-worktree-key=M-w")
+    row = _bind_key_row(stub, key="M-w")
+    assert "python3 -m tmux_worktree_sessions worktree manage" in row
+
+
+def test_worktree_bind_carries_same_env_block(tmux_stub: Callable[..., TmuxStub]) -> None:
+    """Both bind-keys should share the env block, so configuration set for
+    the session picker also reaches the standalone worktree picker."""
+    stub = tmux_stub()
+    _run_tpm_entry(
+        stub,
+        options="@tws-projects-dir=$HOME/MyProjects\n@tws-worktrees-dir=trees",
+    )
+    sessions_row = _bind_key_row(stub, key="C-S-s")
+    worktree_row = _bind_key_row(stub, key="C-S-w")
+    home = os.environ["HOME"]
+    for row in (sessions_row, worktree_row):
+        assert f"TWS_PROJECTS_DIRS='{home}/MyProjects'" in row
+        assert "TWS_WORKTREES_DIR='trees'" in row
 
 
 def _set_option_row(tmux_stub: TmuxStub, option: str) -> str | None:

@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from tmux_worktree_sessions.fetch_reload import fetch_and_reload
-from tmux_worktree_sessions.picker import IconSet
+from tmux_worktree_sessions.icons import IconSet
 
 from .conftest import CurlStub
 

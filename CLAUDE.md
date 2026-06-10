@@ -45,10 +45,10 @@ The plugin is one bash entry point and a Python package:
 - **`tmux-worktree-sessions.tmux`** — TPM entry point. Reads `@tws-*` tmux options, expands literal `$HOME` in option values (tmux does not shell-expand them), and binds the trigger key via `run-shell` with all config passed as environment variables. The bound command invokes `python3 -m tmux_worktree_sessions sessions manage` with `PYTHONPATH` pointing at the plugin's `scripts/` directory.
 
 - **`scripts/tmux_worktree_sessions/`** — Typed Python package with the pure / CLI split called out in `docs/python-migration.md`:
-  - `__main__.py` — argparse dispatcher with one `cmd_<group>_<verb>` handler per subcommand. Owns env reads, stdin/stdout, and file I/O.
+  - `__main__.py` — argparse dispatcher split into two clearly separated tiers: user-facing subcommands (`sessions manage`, `sessions display-name`, `worktree manage`) and an `_internal` subcommand group hidden from `--help` (`_internal session-action <key>`, `_internal fetch-reload`). The internal hatches are fzf-bind-only — the picker shelling back into itself — and may be renamed freely as long as the `picker.py` call sites move in lockstep.
   - `score.py`, `text.py`, `git.py`, `tmux.py`, `picker.py`, `fetch_reload.py`, `sessions.py` — pure modules; functions take all inputs as explicit (often keyword-only) parameters.
-  - `sessions.build_entries` emits the 4-column TSV (`type<TAB>key<TAB>search<TAB>display`) the picker consumes. `cmd_sessions_manage` runs the fzf loop and dispatches on the selected key. Ctrl-D/X/R actions re-invoke `python3 -m tmux_worktree_sessions sessions action <name> ...` via fzf's `execute`/`execute-silent` bindings so they can mutate a shared tmpfile without blocking the picker.
-  - `fetch_reload.fetch_and_reload` is the background helper called from the branch picker via fzf `execute-silent`: runs `git fetch`, regenerates the branch list, and sends fzf a reload command over its `--listen` port.
+  - `sessions.build_entries` emits the 4-column TSV (`type<TAB>key<TAB>search<TAB>display`) the picker consumes. `cmd_sessions_manage` runs the fzf loop and dispatches on the selected key. The `picker.picker_action_ctrl_x|r|d` family handles Ctrl-D/X/R by mutating the shared tmpfile in place; fzf binds invoke them via `_internal session-action <key>` so the picker stays open and just calls `reload(cat ...)` to pick up the new rows.
+  - `fetch_reload.fetch_and_reload` is the background helper called from the branch picker via fzf `execute-silent` (through `_internal fetch-reload`): runs `git fetch`, regenerates the branch list, and sends fzf a reload command over its `--listen` port.
 
 ## Key conventions
 

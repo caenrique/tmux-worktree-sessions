@@ -1,8 +1,8 @@
 """Tests for ``Config.from_env`` resolution.
 
-The CLI handlers in ``tmux_worktree_sessions.__main__`` resolve env vars exactly
-once via ``Config.from_env``. These cases lock down that resolution:
-defaults when nothing is set, ``~`` expansion in paths, ``SCORE_FILE``
+The CLI handlers and picker drivers resolve env vars exactly once via
+``Config.from_env``. These cases lock down that resolution: defaults
+when nothing is set, ``~`` expansion in paths, ``SCORE_FILE``
 precedence, and the icon-style fallback.
 """
 
@@ -11,8 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from tmux_worktree_sessions.__main__ import Config
-from tmux_worktree_sessions.picker import IconSet
+from tmux_worktree_sessions.config import Config
+from tmux_worktree_sessions.icons import IconSet
 
 
 @pytest.fixture(autouse=True)
@@ -30,6 +30,8 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "TWS_SCORES_FILE",
         "TWS_ICON_STYLE",
         "TWS_DEFAULT_BRANCH",
+        "TWS_WORKTREES_DIR",
+        "TWS_DEFAULT_WORKTREE_LAYOUT",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -47,6 +49,8 @@ def test_from_env_defaults_when_nothing_set() -> None:
     assert cfg.score_file == Path("/.local/share/tws/scores.tsv")
     assert cfg.icons == IconSet.from_style("nerd")
     assert cfg.default_branch_fallback == "main"
+    assert cfg.worktrees_dir == ".worktrees"
+    assert cfg.default_layout == "subfolder"
 
 
 def test_from_env_expands_tilde_in_projects_dirs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,3 +124,27 @@ def test_from_env_half_life_in_days_converts_to_seconds(monkeypatch: pytest.Monk
     cfg = Config.from_env()
 
     assert cfg.half_life_secs == 7 * 24 * 3600
+
+
+def test_from_env_worktrees_dir_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TWS_WORKTREES_DIR", "trees")
+
+    cfg = Config.from_env()
+
+    assert cfg.worktrees_dir == "trees"
+
+
+def test_from_env_default_layout_sibling_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TWS_DEFAULT_WORKTREE_LAYOUT", "sibling")
+
+    cfg = Config.from_env()
+
+    assert cfg.default_layout == "sibling"
+
+
+def test_from_env_invalid_default_layout_falls_back_to_subfolder(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TWS_DEFAULT_WORKTREE_LAYOUT", "totally-bogus")
+
+    cfg = Config.from_env()
+
+    assert cfg.default_layout == "subfolder"

@@ -11,6 +11,10 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
+
+WorktreeLayout = Literal["sibling", "subfolder", "ambiguous"]
+ConcreteWorktreeLayout = Literal["sibling", "subfolder"]
 
 
 def list_git_projects(roots: list[Path], *, max_depth: int) -> list[Path]:
@@ -88,6 +92,71 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
+
+
+def current_branch(path: Path) -> str | None:
+    """Return ``branch --show-current`` for ``path``, or ``None``.
+
+    Returns ``None`` for detached HEAD (git prints an empty line) and
+    for paths that aren't inside a git repo (non-zero exit). Callers
+    that want to distinguish those two cases can call ``toplevel``
+    first.
+    """
+    result = _git(path, "branch", "--show-current")
+    if result.returncode != 0:
+        return None
+    branch = result.stdout.strip()
+    return branch or None
+
+
+def fetch_head_mtime(repo: Path) -> float | None:
+    """Return the mtime of ``FETCH_HEAD`` for ``repo``, or ``None``.
+
+    Resolves ``--git-common-dir`` so the lookup is correct from inside a
+    linked worktree. Returns ``None`` when ``repo`` is not a git
+    directory or ``FETCH_HEAD`` does not exist yet.
+    """
+    result = _git(repo, "rev-parse", "--git-common-dir")
+    if result.returncode != 0:
+        return None
+    common_dir = Path(result.stdout.strip())
+    if not common_dir.is_absolute():
+        common_dir = repo / common_dir
+    fetch_head = common_dir / "FETCH_HEAD"
+    try:
+        return fetch_head.stat().st_mtime
+    except FileNotFoundError:
+        return None
+
+
+def fetch_all(repo: Path) -> bool:
+    """Run ``git fetch --all --quiet`` in ``repo``; return success.
+
+    Output is captured (not propagated) so callers can run this in the
+    background without spamming the terminal. A non-zero exit is returned
+    as ``False`` rather than raised — the picker treats network failures
+    as non-fatal and still reloads the local branch list.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(repo), "fetch", "--all", "--quiet"],
+        check=False,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def worktree_remove(repo: Path, wt_path: Path | str, *, force: bool = True) -> None:
+    """Run ``git worktree remove`` for ``wt_path``; errors are swallowed.
+
+    The ``--force`` flag is on by default to match the picker's
+    delete-without-prompt behaviour for a worktree that lost its
+    backing branch or has untracked files.
+    """
+    cmd = ["git", "-C", str(repo), "worktree", "remove"]
+    if force:
+        cmd.append("--force")
+    cmd.append(str(wt_path))
+    subprocess.run(cmd, capture_output=True)
 
 
 def toplevel(path: Path) -> Path | None:
@@ -321,6 +390,52 @@ def add_worktree(
     return worktree_path
 
 
+def detect_layout(repo: Path, *, worktrees_dir: str) -> WorktreeLayout:
+    """Classify the worktree layout used by ``repo``.
+
+    Returns ``"sibling"`` when every linked worktree sits next to the
+    main checkout (``<wt>.parent == <main>.parent``), ``"subfolder"``
+    when every linked worktree sits under ``<main>/<worktrees_dir>/``,
+    and ``"ambiguous"`` when there are no linked worktrees yet or the
+    existing ones don't all match a single shape. The caller is expected
+    to resolve ``"ambiguous"`` to a concrete layout via the configured
+    default before placing new worktrees.
+    """
+    worktrees = list_worktrees(repo)
+    if len(worktrees) < 2:
+        return "ambiguous"
+    main = worktrees[0].path
+    linked = [wt.path for wt in worktrees[1:]]
+
+    sibling_parent = main.parent
+    if all(wt.parent == sibling_parent for wt in linked):
+        return "sibling"
+
+    subfolder_parent = main / worktrees_dir
+    if all(wt.parent == subfolder_parent for wt in linked):
+        return "subfolder"
+
+    return "ambiguous"
+
+
+def worktree_container(
+    main: Path,
+    *,
+    layout: ConcreteWorktreeLayout,
+    worktrees_dir: str,
+) -> Path:
+    """Return the directory new worktrees should be placed under.
+
+    For ``"sibling"`` layout this is ``<main>.parent`` (where
+    sibling-layout repos already keep their checkouts). For
+    ``"subfolder"`` it is ``<main>/<worktrees_dir>``. The caller owns
+    ensuring the directory exists before invoking ``git worktree add``.
+    """
+    if layout == "sibling":
+        return main.parent
+    return main / worktrees_dir
+
+
 def rename_worktree(
     repo: Path,
     container: Path,
@@ -338,12 +453,7 @@ def rename_worktree(
     The interactive fzf rename prompt lives in the CLI dispatcher; this
     function only owns the post-prompt git/move/repair half.
     """
-    show = subprocess.run(
-        ["git", "-C", str(wt_path), "branch", "--show-current"],
-        capture_output=True,
-        text=True,
-    )
-    old_branch = show.stdout.strip() if show.returncode == 0 else ""
+    old_branch = current_branch(wt_path)
     if not old_branch:
         raise RuntimeError("Cannot rename: worktree is in detached HEAD state")
 

@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from . import git, score, text, tmux
-from .picker import IconSet
+from .icons import IconSet
 
 # Catppuccin Mocha colours used to highlight session rows in
 # build_entries and the ctrl-r session-rename action.
@@ -37,6 +37,24 @@ def parse_manual_sessions(spec: str, *, home: str) -> list[tuple[str, Path]]:
     return pairs
 
 
+def expand_subfolder_worktrees(repo: Path, *, worktrees_dir: str) -> list[Path]:
+    """Return subfolder-layout linked worktrees of ``repo`` via filesystem stat.
+
+    For each child of ``<repo>/<worktrees_dir>/`` that is a directory and
+    contains a ``.git`` entry (file or directory), the child path is
+    returned. The output is empty when the worktrees directory does not
+    exist, is not a directory, or is unreadable. No git subprocess is
+    invoked — this is the hot path that runs once per discovered repo
+    when the picker opens, so it stays purely filesystem-bound.
+    """
+    sub = repo / worktrees_dir
+    try:
+        children = list(sub.iterdir())
+    except (FileNotFoundError, NotADirectoryError, PermissionError):
+        return []
+    return [child for child in children if child.is_dir() and (child / ".git").exists()]
+
+
 def list_projects(
     roots: list[Path],
     *,
@@ -44,16 +62,23 @@ def list_projects(
     home: str,
     strip_prefixes: list[str],
     manual_spec: str,
+    worktrees_dir: str,
 ) -> Iterator[tuple[str, Path]]:
-    """Yield ``(display_name, path)`` for every git project, then manual sessions.
+    """Yield ``(display_name, path)`` for every git worktree, then manual sessions.
 
-    Git projects are discovered via :func:`git.list_git_projects` and
-    rendered through :func:`text.format_session_name`. Manual sessions
-    are appended verbatim after the discovered projects.
+    Sibling-layout worktrees are surfaced by ``fd`` directly (each has
+    its own ``.git`` entry at top level). Subfolder-layout linked
+    worktrees, which ``fd --prune`` skips, are synthesized from the
+    filesystem via :func:`expand_subfolder_worktrees`. The whole flow
+    avoids per-repo git subprocesses so the picker opens fast even with
+    many repos. Manual sessions are appended verbatim afterwards.
     """
     for project in git.list_git_projects(roots, max_depth=max_depth):
         name = text.format_session_name(str(project), home=home, strip_prefixes=strip_prefixes)
         yield name, project
+        for wt_path in expand_subfolder_worktrees(project, worktrees_dir=worktrees_dir):
+            wt_name = text.format_session_name(str(wt_path), home=home, strip_prefixes=strip_prefixes)
+            yield wt_name, wt_path
     yield from parse_manual_sessions(manual_spec, home=home)
 
 
@@ -171,6 +196,7 @@ def build_entries(
     now: float,
     half_life_secs: float,
     path_boost: float,
+    worktrees_dir: str,
 ) -> Iterator[str]:
     """Yield the unified 4-column TSV the session picker consumes.
 
@@ -223,6 +249,7 @@ def build_entries(
         home=home,
         strip_prefixes=strip_prefixes,
         manual_spec=manual_spec,
+        worktrees_dir=worktrees_dir,
     ):
         if name.replace(".", "_") in open_names:
             continue
