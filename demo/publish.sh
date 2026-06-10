@@ -21,21 +21,16 @@ fi
 unset GH_HOST
 
 if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-  # `--latest=false` signals intent on creation, but it isn't enough
-  # on its own: when no other non-prerelease tag exists, GitHub falls
-  # back to date-based "Latest" detection and re-promotes this one.
-  # The follow-up PATCH below sets prerelease=true, which categorically
-  # excludes the release from Latest detection.
   gh release create "$TAG" --repo "$REPO" \
     --title "Demo assets" \
     --notes "Static assets referenced from the README. Not a versioned release." \
     --latest=false
 fi
 
-# Re-assert prerelease on every publish so a release that was created
-# before this flag landed gets demoted on the next run. Idempotent.
-RELEASE_ID=$(gh api "repos/$REPO/releases/tags/$TAG" --jq .id)
-gh api -X PATCH "repos/$REPO/releases/$RELEASE_ID" -F prerelease=true >/dev/null
+# Re-assert --latest=false on every publish so a release that was
+# created before this flag landed gets demoted on the next run.
+# Idempotent — a no-op when already not-latest.
+gh release edit "$TAG" --repo "$REPO"
 
 gh release upload "$TAG" "$GIF" --repo "$REPO" --clobber
 
