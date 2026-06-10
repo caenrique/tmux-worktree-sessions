@@ -91,6 +91,31 @@ A few project-specific rules worth calling out — the rest is whatever
   user-facing CLI surface is `sessions manage`,
   `sessions display-name`, and `worktree manage`.
 
+## Recency ranking
+
+The picker mixes two distinct ordering rules — useful background when
+touching `score.py`, `sessions.py`, or anything that emits picker rows.
+
+**Running sessions** are ordered by tmux's own `session_last_attached`
+timestamp. The current session is pinned first, the previous second,
+and the rest follow newest→oldest. `Enter` updates `session_last_attached`
+naturally, so no extra bookkeeping is needed for this tier.
+
+**Projects** are ranked by an exponential-decay score persisted to
+`@tws-scores-file` (default `$HOME/.local/share/tws/scores.tsv`). Each
+switch to a project's session bumps its score by 1; scores decay with a
+configurable half-life (`@tws-score-half-life`, default 14 days), so
+projects you haven't touched gradually sink. Project entries whose path
+shares a longer prefix with the picker's invoking cwd get an additive
+boost scaled by `@tws-score-path-boost` (default 1.0; set to 0 to
+disable).
+
+At the default values, a same-repo worktree picked at least once in the
+last month outranks an unrelated project picked last week, while a
+project picked multiple times this week always stays on top. The exact
+arithmetic lives in `score.py`; tests in `tests/python/test_score.py`
+pin the behaviour.
+
 ## Releases
 
 Maintainers cut releases — contributors don't need to bump versions or
