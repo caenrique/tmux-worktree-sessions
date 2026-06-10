@@ -4,7 +4,9 @@
 
 A tmux plugin that gives you a unified fuzzy picker for sessions and git worktrees. Open any project, switch between running sessions, create and delete worktrees, and rename branches — all from a single keyboard shortcut, ranked by how recently you used them.
 
-## What it does
+🔍 fuzzy picker &nbsp;·&nbsp; 🌿 git worktrees &nbsp;·&nbsp; 📊 recency ranked &nbsp;·&nbsp; ⚡ one keypress
+
+## ✨ What it does
 
 Press the session key (default `Ctrl+Shift+S`) from anywhere in tmux to open a full-screen picker. The picker shows:
 
@@ -13,16 +15,16 @@ Press the session key (default `Ctrl+Shift+S`) from anywhere in tmux to open a f
 
 Selecting an entry switches to the session (or creates one if the project isn't open yet). Everything you need to manage your workspace — creating worktrees, renaming branches, deleting sessions — is a keypress away inside the picker.
 
-## Requirements
+## 📋 Requirements
 
+- [python](https://www.python.org) ≥ 3.8 — the plugin's logic is a Python package; bash is just the TPM entry point
 - [tmux](https://github.com/tmux/tmux) ≥ 3.2
 - [git](https://git-scm.com)
-- [fzf](https://github.com/junegunn/fzf)
-- [python](https://www.python.org) ≥ 3.8 *(for recency-score sorting)*
-- [fd](https://github.com/sharkdp/fd)
-- [curl](https://curl.se) *(for the live fetch-and-reload animation in the branch picker)*
+- [fzf](https://github.com/junegunn/fzf) — picker UI, also used as `--listen` server for the live branch-list reload
+- [fd](https://github.com/sharkdp/fd) — fast project discovery under `@tws-projects-dir`
+- [curl](https://curl.se) — talks to fzf's `--listen` HTTP port to drive the fetch-and-reload animation in the branch picker
 
-## Installation
+## 📦 Installation
 
 ### With TPM
 
@@ -42,7 +44,7 @@ Clone the repository and source the entry point from your tmux config:
 run-shell '/path/to/tmux-worktree-sessions/tmux-worktree-sessions.tmux'
 ```
 
-## Configuration
+## ⚙️ Configuration
 
 All options are set in `tmux.conf` with `set -g @option value`. Every option has a sensible default — you only need to set the ones you want to change.
 
@@ -89,7 +91,7 @@ set -g status-left '#{session_display_name} | %H:%M'
 
 The placeholder is expanded once when the plugin is loaded by TPM, so make sure your `status-left` / `status-right` are set **before** the `run '~/.tmux/plugins/tpm/tpm'` line in your `tmux.conf`.
 
-## Usage
+## 📖 Usage
 
 ### Session picker
 
@@ -118,7 +120,7 @@ Opened by pressing `Ctrl-W` in the session picker, or directly with `Ctrl+Shift+
 
 Selecting the `[new]` entry at the top of the list lets you type a new branch name, which is created from the repo's default remote branch.
 
-## Worktree layouts
+## 🌳 Worktree layouts
 
 The plugin supports two worktree layouts and picks the right one per repo by inspecting existing linked worktrees.
 
@@ -159,7 +161,7 @@ For each repo the plugin looks at the existing linked worktrees:
 
 `Ctrl-W` creates a new worktree in the right place; `Ctrl-R` renames within the same layout.
 
-## Development
+## 🛠️  Development
 
 The dev environment is driven by [devenv](https://devenv.sh/) and uses
 `uv` for Python deps. After installing [Nix](https://nixos.org/download)
@@ -181,26 +183,11 @@ tws --help
 See [BUILD.md](BUILD.md) for the full guide — task list, dependency
 management, lint setup, test layout, and CI details.
 
-## Recency ranking
+## 🔗 See also
 
-**Running sessions** are ordered by tmux's own `session_last_attached` timestamp. The current session is pinned first, the previous second, and the rest follow newest→oldest. Switching to a session with `Enter` updates this naturally, so the picker always reflects your real attach history.
-
-**Projects** are ranked by how recently *and* frequently you've opened them. Each time you switch to a session for a project, its score increases by 1. Scores decay with a configurable half-life (default: 14 days), so projects you haven't touched in a while gradually sink below more active ones.
-
-Project entries whose path shares a longer prefix with your current working directory also get a boost (configurable via `@tws-score-path-boost`, default `1.0`). At the default values, a same-repo worktree picked at least once in the last month will rank above an unrelated project picked last week, while a project you've picked multiple times this week always stays at the top.
-
-## See also
-
-| | tmux-worktree-sessions | [tmux-sessionizer](https://github.com/ThePrimeagen/tmux-sessionizer) | [tmux-fzf](https://github.com/sainnhe/tmux-fzf) | [tmux-project](https://github.com/sei40kr/tmux-project) |
-|---|---|---|---|---|
-| Session switching | ✓ | ✓ | ✓ | ✓ |
-| Project discovery | ✓ | ✓ | — | ✓ |
-| Recency ranking | ✓ | — | — | — |
-| Git worktree management | ✓ | — | — | — |
-| Branch picker | ✓ | — | — | — |
-| Window/pane management | — | — | ✓ | — |
-
-**tmux-sessionizer** is the go-to if you want something minimal and scriptable. **tmux-fzf** is a better fit if you also need window and pane management. **tmux-project** is similar in scope to tmux-worktree-sessions but without worktree support. Choose this plugin if your workflow revolves around git worktrees and you want everything — project discovery, session switching, and branch management — in one picker.
+- [tmux-sessionizer](https://github.com/ThePrimeagen/tmux-sessionizer)
+- [tmux-fzf](https://github.com/sainnhe/tmux-fzf)
+- [tmux-project](https://github.com/sei40kr/tmux-project)
 
 ---
 
