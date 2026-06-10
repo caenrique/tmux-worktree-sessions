@@ -57,6 +57,12 @@
     "demo:render" = {
       exec = "bash demo/setup.sh && vhs demo/readme.tape";
     };
+    # One-shot for the maintainer: render the GIF locally and publish
+    # it to the `demo-assets` GitHub release the README links to.
+    # Requires `gh` to be authenticated against github.com.
+    "demo:release" = {
+      exec = "bash demo/setup.sh && vhs demo/readme.tape && bash demo/publish.sh";
+    };
   };
 
   enterTest = ''
