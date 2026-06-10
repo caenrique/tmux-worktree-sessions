@@ -46,6 +46,9 @@
       exec = "uv run ruff format --check scripts/ tests/python";
       before = [ "devenv:enterTest" ];
     };
+    "python:format" = {
+      exec = "uv run ruff format scripts/ tests/python";
+    };
     "python:typecheck" = {
       exec = "uv run mypy scripts/tmux_worktree_sessions";
       before = [ "devenv:enterTest" ];

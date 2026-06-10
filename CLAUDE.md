@@ -29,6 +29,7 @@ Every bug fix and every new feature MUST:
 
 1. Update `tests/python/` to cover the changed behaviour, and `uv run pytest tests/python` MUST pass.
 2. Run shellcheck on `tmux-worktree-sessions.tmux` if you touched it, and address every warning before commit. Suppress with `# shellcheck disable=SC####` only when the warning is a known false positive, and include a comment explaining why.
+3. Before committing, linting and formatting MUST pass. Run `devenv tasks run python:lint`, `devenv tasks run python:format-check`, and `devenv tasks run python:typecheck` (or `devenv test` for everything). If `python:format-check` reports diffs, run `devenv tasks run python:format` to apply them, then commit.
 
 A change is not done until `devenv test` is green.
 

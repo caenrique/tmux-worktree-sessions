@@ -202,9 +202,7 @@ def test_add_worktree_new_branch_has_no_upstream(make_repo: Callable[..., Path],
         capture_output=True,
         text=True,
     )
-    assert upstream.returncode != 0, (
-        f"new branch must not have an upstream, got: {upstream.stdout.strip()!r}"
-    )
+    assert upstream.returncode != 0, f"new branch must not have an upstream, got: {upstream.stdout.strip()!r}"
 
 
 def test_add_worktree_checks_out_existing_local_branch(make_repo: Callable[..., Path], tmp_path: Path) -> None:
