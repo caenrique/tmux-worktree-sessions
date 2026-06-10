@@ -23,15 +23,17 @@ unset GH_HOST
 if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   gh release create "$TAG" --repo "$REPO" \
     --title "Demo assets" \
-    --notes "Static assets referenced from the README. Not a versioned release." \
-    --latest=false
+    --notes "Static assets referenced from the README. Not a versioned release."
 fi
 
-# Always re-assert --latest=false: `--latest=false` on `release create`
-# only applies the first time, and an existing release created without
-# it would still appear as "Latest" on the repo homepage and shadow any
-# real versioned tag. Idempotent — a no-op if already demoted.
-gh release edit "$TAG" --repo "$REPO" --latest=false
+# Always re-assert make_latest=false via the API. `gh release edit
+# --latest=false` is unreliable (the CLI sends nothing for the false
+# case in current gh versions), and the release would otherwise appear
+# as "Latest" on the repo homepage and shadow real versioned tags. The
+# REST field is a string "true"|"false"|"legacy", so use `-f` (raw
+# string), not `-F` (typed bool).
+RELEASE_ID=$(gh api "repos/$REPO/releases/tags/$TAG" --jq .id)
+gh api -X PATCH "repos/$REPO/releases/$RELEASE_ID" -f make_latest=false >/dev/null
 
 gh release upload "$TAG" "$GIF" --repo "$REPO" --clobber
 
