@@ -24,13 +24,10 @@ if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   gh release create "$TAG" --repo "$REPO" \
     --title "Demo assets" \
     --notes "Static assets referenced from the README. Not a versioned release." \
-    --latest=false
+    --prerelease
 fi
 
-# Re-assert --latest=false on every publish so a release that was
-# created before this flag landed gets demoted on the next run.
-# Idempotent — a no-op when already not-latest.
-gh release edit "$TAG" --repo "$REPO"
+# gh release edit "$TAG" --repo "$REPO"
 
 gh release upload "$TAG" "$GIF" --repo "$REPO" --clobber
 
