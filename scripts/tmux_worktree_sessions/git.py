@@ -396,13 +396,27 @@ def detect_layout(repo: Path, *, worktrees_dir: str) -> WorktreeLayout:
     Returns ``"sibling"`` when every linked worktree sits next to the
     main checkout (``<wt>.parent == <main>.parent``), ``"subfolder"``
     when every linked worktree sits under ``<main>/<worktrees_dir>/``,
-    and ``"ambiguous"`` when there are no linked worktrees yet or the
-    existing ones don't all match a single shape. The caller is expected
-    to resolve ``"ambiguous"`` to a concrete layout via the configured
-    default before placing new worktrees.
+    and ``"ambiguous"`` when the existing worktrees don't all match a
+    single shape.
+
+    With no linked worktrees yet the path shape of the main checkout
+    alone is consulted: a checkout whose basename equals its current
+    branch (e.g. ``Projects/webapp/main`` on branch ``main``) is the
+    canonical sibling-layout convention — the parent is the project
+    container and future worktrees would land beside ``main`` as
+    ``Projects/webapp/<branch>``. When the basename does not match
+    (typically ``Projects/webapp/`` itself, where worktrees would nest
+    under ``.worktrees/``), classification is ``"ambiguous"`` and the
+    caller resolves it via the configured default.
     """
     worktrees = list_worktrees(repo)
     if len(worktrees) < 2:
+        if not worktrees:
+            return "ambiguous"
+        main = worktrees[0].path
+        branch = current_branch(main)
+        if branch is not None and main.name == branch:
+            return "sibling"
         return "ambiguous"
     main = worktrees[0].path
     linked = [wt.path for wt in worktrees[1:]]

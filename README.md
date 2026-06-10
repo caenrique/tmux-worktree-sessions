@@ -154,7 +154,8 @@ For each repo the plugin looks at the existing linked worktrees:
 
 - All siblings of the main checkout → **sibling layout**.
 - All under `<main>/<worktrees-dir>/` → **subfolder layout**.
-- No linked worktrees yet, or a mix → fall back to `@tws-default-worktree-layout` (default `subfolder`, so a freshly cloned repo never creates worktrees outside its own directory).
+- No linked worktrees yet, but the main checkout's basename matches its current branch (e.g. `repo/main/` on branch `main`) → **sibling layout** (the canonical sibling shape — future worktrees land at `repo/<branch>/`).
+- A mix, or none of the above → fall back to `@tws-default-worktree-layout` (default `subfolder`, so a freshly cloned repo never creates worktrees outside its own directory).
 
 `Ctrl-W` creates a new worktree in the right place; `Ctrl-R` renames within the same layout.
 
