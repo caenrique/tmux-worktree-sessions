@@ -24,8 +24,13 @@ ln -snf "$REPO" "$ROOT/repo"
 # spawned by the new tmux session also use bash via demo/tmux.conf's
 # `default-shell`. Empty .zshrc/.zshenv prevent any zsh fallback from
 # trying to source the user's vendor profile that doesn't exist here.
+# Pin fzf to Catppuccin Mocha so the picker renders the same in CI as
+# it does locally. Without this, fzf falls back to its built-in palette
+# in CI (which has no FZF_DEFAULT_OPTS set), but a developer running the
+# demo locally would see their personal theme instead.
 cat > "$ROOT/home/.bashrc" <<'EOF'
 export PS1='\[\e[36m\]\$\[\e[0m\] '
+export FZF_DEFAULT_OPTS='--color=bg+:#313244,bg:#1e1e2e,spinner:#f5e0dc,hl:#f38ba8,fg:#cdd6f4,header:#f38ba8,info:#cba6f7,pointer:#f5e0dc,marker:#b4befe,fg+:#cdd6f4,prompt:#cba6f7,hl+:#f38ba8,border:#89b4fa'
 EOF
 : > "$ROOT/home/.zshrc"
 : > "$ROOT/home/.zshenv"
