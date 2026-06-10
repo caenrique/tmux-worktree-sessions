@@ -48,12 +48,25 @@ mkrepo() {
 
 mkrepo "$ROOT/Projects/webapp/main" feature/login feature/signup
 mkrepo "$ROOT/Projects/api/main"
+mkrepo "$ROOT/Projects/mobile-app/main"
+mkrepo "$ROOT/Projects/design-system/main"
+mkrepo "$ROOT/Projects/analytics/main"
+mkrepo "$ROOT/Projects/payments-service/main"
+mkrepo "$ROOT/Projects/internal-docs/main"
+mkrepo "$ROOT/Projects/infra/main"
 
-# Pre-warm scores file so projects appear in a deterministic order.
+# Pre-warm scores file so projects appear in a stable, recognizable
+# order in the picker (highest base wins; same ts means recency tie).
 mkdir -p "$ROOT/state"
 cat > "$ROOT/state/scores.tsv" <<'EOF'
 webapp	100	1700000000
-api	50	1700000000
+api	90	1700000000
+mobile-app	80	1700000000
+design-system	70	1700000000
+analytics	60	1700000000
+payments-service	50	1700000000
+internal-docs	40	1700000000
+infra	30	1700000000
 EOF
 
 echo "fixture ready at $ROOT"
