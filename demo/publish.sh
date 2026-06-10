@@ -21,16 +21,15 @@ fi
 unset GH_HOST
 
 if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-  # `--prerelease` keeps this asset bucket out of GitHub's "Latest"
-  # promotion entirely. `make_latest=false` alone doesn't work: if no
-  # other non-prerelease release exists, GitHub still picks one by
-  # date and re-promotes this tag. Pre-releases are categorically
-  # excluded from latest, so the homepage falls back to whichever
-  # versioned tag actually qualifies (or none, if there are none).
+  # `--latest=false` signals intent on creation, but it isn't enough
+  # on its own: when no other non-prerelease tag exists, GitHub falls
+  # back to date-based "Latest" detection and re-promotes this one.
+  # The follow-up PATCH below sets prerelease=true, which categorically
+  # excludes the release from Latest detection.
   gh release create "$TAG" --repo "$REPO" \
     --title "Demo assets" \
     --notes "Static assets referenced from the README. Not a versioned release." \
-    --prerelease
+    --latest=false
 fi
 
 # Re-assert prerelease on every publish so a release that was created
