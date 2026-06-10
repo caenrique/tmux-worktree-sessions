@@ -440,9 +440,23 @@ def test_main_worktree_outside_a_repo_returns_none(tmp_path: Path) -> None:
     assert main_worktree(plain) is None
 
 
-def test_detect_layout_no_linked_worktrees_is_ambiguous(make_repo: Callable[..., Path]) -> None:
+def test_detect_layout_no_linked_worktrees_basename_mismatch_is_ambiguous(
+    make_repo: Callable[..., Path],
+) -> None:
+    # Basename "r" doesn't match the default branch "main", so the path
+    # shape gives no signal and the caller must fall back to its default.
     repo = make_repo("r")
     assert detect_layout(repo, worktrees_dir=".worktrees") == "ambiguous"
+
+
+def test_detect_layout_no_linked_worktrees_basename_matches_branch_is_sibling(
+    make_repo: Callable[..., Path],
+) -> None:
+    # Layout: tmp/container/main on branch "main" — the canonical sibling
+    # shape, so detection should pick it up before any linked worktree
+    # exists.
+    repo = make_repo("container/main")
+    assert detect_layout(repo, worktrees_dir=".worktrees") == "sibling"
 
 
 def test_detect_layout_sibling_when_linked_is_sibling_of_main(

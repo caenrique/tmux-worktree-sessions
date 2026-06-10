@@ -11,6 +11,7 @@
     pkgs.fzf
     pkgs.fd
     pkgs.shellcheck
+    pkgs.vhs
   ];
 
   # uv-driven Python dev environment. `sync.enable` runs `uv sync` on
@@ -52,6 +53,18 @@
     "shellcheck:lint" = {
       exec = "shellcheck --severity=warning tmux-worktree-sessions.tmux";
       before = [ "devenv:enterTest" ];
+    };
+    "demo:render" = {
+      exec = "bash demo/setup.sh && vhs demo/readme.tape";
+    };
+    # Publish the rendered GIF to the `demo-assets` GitHub release the
+    # README links to. By default `demo:render` runs first via the
+    # `after` dependency; pass `--mode single` to publish whatever is
+    # already at /tmp/tws-demo/readme.gif without re-rendering.
+    # Requires `gh` to be authenticated against github.com.
+    "demo:release" = {
+      exec = "bash demo/publish.sh";
+      after = [ "demo:render" ];
     };
   };
 
