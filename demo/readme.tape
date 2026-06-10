@@ -50,7 +50,11 @@ Sleep 3s
 Enter
 Sleep 2s
 
-Type "feature/demo-readme"
+# Branch name deliberately does NOT contain "demo": the next step
+# searches the running-sessions list for `demo` to switch back, and a
+# substring overlap would let fzf rank the just-created (currently
+# attached) session above the target.
+Type "feature/checkout"
 Sleep 1500ms
 Enter
 
