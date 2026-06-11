@@ -13,8 +13,10 @@ the running picker so it can call back into itself. Grouped under the
 ``_internal`` subcommand (hidden from ``--help``) so the boundary stays
 obvious:
 
-* ``_internal session-action <key>`` — ctrl-x/ctrl-r/ctrl-d binds spawned
+* ``_internal session-action <key>`` — ctrl-x/ctrl-r binds spawned
   inside the session-picker ``manage`` loop.
+* ``_internal branch-action <key>`` — ctrl-x bind spawned inside the
+  branch picker (``picker.pick_branch``).
 * ``_internal fetch-reload`` — bind spawned inside the branch picker
   (``picker.pick_branch``) to background-fetch and reload entries.
 
@@ -103,11 +105,18 @@ def _add_internal_subcommands(sub: argparse._SubParsersAction[argparse.ArgumentP
     internal_sub = internal_p.add_subparsers(dest="internal_command", metavar="<subcommand>")
 
     action_p = internal_sub.add_parser("session-action")
-    action_p.add_argument("key", choices=("ctrl-x", "ctrl-r", "ctrl-d"), help="action key")
+    action_p.add_argument("key", choices=("ctrl-x", "ctrl-r"), help="action key")
     action_p.add_argument("type", help="picker entry type: 's', 'p', or 'n'")
     action_p.add_argument("id", help="session id (without leading $) or project path")
     action_p.add_argument("tmpfile", help="picker entries tmpfile to mutate in place")
     action_p.set_defaults(handler=cmd_internal_session_action)
+
+    branch_p = internal_sub.add_parser("branch-action")
+    branch_p.add_argument("key", choices=("ctrl-x",), help="action key")
+    branch_p.add_argument("repo", help="path to the git repo whose branches are being picked")
+    branch_p.add_argument("branch", help="branch name selected in the picker (column 1 of the row)")
+    branch_p.add_argument("tmpfile", help="picker entries tmpfile to mutate in place")
+    branch_p.set_defaults(handler=cmd_internal_branch_action)
 
     fetch_p = internal_sub.add_parser("fetch-reload")
     fetch_p.add_argument("repo", help="path to the git repo")
@@ -188,7 +197,6 @@ def cmd_worktree_manage(args: argparse.Namespace) -> int:
 _PICKER_ACTIONS: dict[str, Callable[..., int]] = {
     "ctrl-x": picker.picker_action_ctrl_x,
     "ctrl-r": picker.picker_action_ctrl_r,
-    "ctrl-d": picker.picker_action_ctrl_d,
 }
 
 
@@ -198,6 +206,20 @@ def cmd_internal_session_action(args: argparse.Namespace) -> int:
         row_id=args.id,
         tmpfile=Path(args.tmpfile),
         cfg=Config.from_env(),
+    )
+
+
+def cmd_internal_branch_action(args: argparse.Namespace) -> int:
+    cfg = Config.from_env()
+    # Only ctrl-x is wired up today; the choices= guard above means we
+    # never reach this dispatcher with anything else.
+    return picker.branch_action_ctrl_x(
+        repo=Path(args.repo),
+        branch=args.branch,
+        tmpfile=Path(args.tmpfile),
+        icons=cfg.icons,
+        home=cfg.home,
+        strip_prefixes=cfg.strip_prefixes,
     )
 
 

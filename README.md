@@ -101,11 +101,12 @@ Open with the configured key (default `Ctrl+Shift+S`).
 |---|---|
 | `Enter` | Switch to the selected session; create one if the entry is a project |
 | `Ctrl-W` | Open the branch/worktree picker for the selected repo |
-| `Ctrl-D` | Kill the session **and** delete its linked git worktree. On orphaned directories, prompts for confirmation before deleting |
-| `Ctrl-X` | Kill the session only; the entry stays visible as a project |
+| `Ctrl-X` | Kill the session; the entry stays visible as a project |
 | `Ctrl-R` | Rename: for linked worktrees, renames the git branch and moves the directory; for plain sessions, renames the tmux session |
 | `?` | Toggle the preview pane (shows session window contents or a directory listing) |
 | `Ctrl-Backspace` / `Esc` | Close the picker |
+
+To remove a worktree, open the branch picker and press `Ctrl-X` on its row.
 
 ### Branch / worktree picker
 
@@ -114,6 +115,7 @@ Opened by pressing `Ctrl-W` in the session picker, or directly with `Ctrl+Shift+
 | Key | Action |
 |---|---|
 | `Enter` | Checkout the selected branch in a new worktree (or switch if already checked out) |
+| `Ctrl-X` | Delete the selected branch's worktree; kills its tmux session first if one is open. Flashes a message when the row has no worktree, is the main worktree, or is the `[new]` sentinel. Branches themselves are never deleted |
 | `Ctrl-F` | Fetch all remotes and reload the branch list. Fetching also happens automatically when the last fetch is more than 15 minutes old |
 | `Ctrl-Backspace` | Go back to the session picker |
 | `Esc` | Close everything |
