@@ -151,22 +151,6 @@ def apply_ctrl_r_session_rename(
     return result
 
 
-def remove_session_row(lines: list[str], *, sid: str) -> list[str]:
-    """Drop the ``s<TAB><sid><TAB>...`` rows from a tmpfile snapshot."""
-    prefix = f"s\t{sid}\t"
-    return [line for line in lines if not line.startswith(prefix)]
-
-
-def remove_project_row(lines: list[str], *, path: str) -> list[str]:
-    """Drop the ``p<TAB><path><TAB>...`` rows from a tmpfile snapshot.
-
-    Path comparison is exact — the column is tab-delimited, so no glob
-    escaping is needed.
-    """
-    prefix = f"p\t{path}\t"
-    return [line for line in lines if not line.startswith(prefix)]
-
-
 def _format_session_display(
     sess_path: Path,
     name: str,
@@ -270,25 +254,3 @@ def build_entries(
         yield f"p\t{row_path}\t{row_name}\t{icons.project}{icons.sep}{row_name}"
 
     yield f"n\t\tnew session\t{icons.new}{icons.sep}new session"
-
-
-def is_orphaned_worktree(path: Path, *, container: Path) -> bool:
-    """Return True when ``container`` holds a sibling of ``path`` with ``.git``.
-
-    A directory looks like an orphaned worktree when at least one of its
-    siblings is a real git repo (``.git`` present as file or directory).
-    The sibling search excludes ``path`` itself; non-directory entries
-    and unreadable containers return False.
-    """
-    try:
-        children = list(container.iterdir())
-    except (FileNotFoundError, NotADirectoryError, PermissionError):
-        return False
-    for sibling in children:
-        if not sibling.is_dir():
-            continue
-        if sibling == path:
-            continue
-        if (sibling / ".git").exists():
-            return True
-    return False

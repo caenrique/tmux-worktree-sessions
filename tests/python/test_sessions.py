@@ -1,10 +1,9 @@
 """Tests for :mod:`tmux_worktree_sessions.sessions`.
 
 Pure-layer cases for ``parse_manual_sessions``, ``list_projects``,
-``is_orphaned_worktree``, ``build_entries``, and the action-row
-rewrites; CLI-layer cases for the four production action subcommands
-(``ctrl-x``, ``ctrl-r``, ``ctrl-d``) plus ``display-name`` and
-``manage`` exercise ``main(...)`` end-to-end.
+``build_entries``, and the action-row rewrites; CLI-layer cases for
+the production action subcommands (``ctrl-x``, ``ctrl-r``) plus
+``display-name`` and ``manage`` exercise ``main(...)`` end-to-end.
 """
 
 from __future__ import annotations
@@ -21,11 +20,8 @@ from tmux_worktree_sessions.sessions import (
     apply_ctrl_x,
     build_entries,
     expand_subfolder_worktrees,
-    is_orphaned_worktree,
     list_projects,
     parse_manual_sessions,
-    remove_project_row,
-    remove_session_row,
 )
 
 
@@ -49,48 +45,6 @@ def test_parse_manual_sessions_expands_leading_tilde() -> None:
 def test_parse_manual_sessions_skips_tokens_without_colon() -> None:
     pairs = parse_manual_sessions("ok:/p bad notagain:/q", home="/home/u")
     assert pairs == [("ok", Path("/p")), ("notagain", Path("/q"))]
-
-
-def test_is_orphaned_worktree_true_when_sibling_has_dotgit(tmp_path: Path) -> None:
-    container = tmp_path / "wt"
-    orphan = container / "orphan"
-    realrepo = container / "realrepo"
-    orphan.mkdir(parents=True)
-    realrepo.mkdir(parents=True)
-    (realrepo / ".git").mkdir()
-    assert is_orphaned_worktree(orphan, container=container) is True
-
-
-def test_is_orphaned_worktree_false_when_no_siblings(tmp_path: Path) -> None:
-    container = tmp_path / "lonely"
-    only = container / "only"
-    only.mkdir(parents=True)
-    assert is_orphaned_worktree(only, container=container) is False
-
-
-def test_is_orphaned_worktree_false_when_sibling_has_no_dotgit(tmp_path: Path) -> None:
-    container = tmp_path / "wt"
-    orphan = container / "orphan"
-    notes = container / "notes"
-    orphan.mkdir(parents=True)
-    notes.mkdir(parents=True)
-    assert is_orphaned_worktree(orphan, container=container) is False
-
-
-def test_is_orphaned_worktree_accepts_dotgit_file_as_well_as_dir(tmp_path: Path) -> None:
-    container = tmp_path / "wt"
-    orphan = container / "orphan"
-    linked = container / "linked"
-    orphan.mkdir(parents=True)
-    linked.mkdir(parents=True)
-    (linked / ".git").write_text("gitdir: /elsewhere/.git/worktrees/linked\n")
-    assert is_orphaned_worktree(orphan, container=container) is True
-
-
-def test_is_orphaned_worktree_missing_container_returns_false(tmp_path: Path) -> None:
-    missing = tmp_path / "does-not-exist"
-    candidate = missing / "child"
-    assert is_orphaned_worktree(candidate, container=missing) is False
 
 
 def test_expand_subfolder_worktrees_returns_children_with_dotgit(tmp_path: Path) -> None:
@@ -531,140 +485,6 @@ def test_cli_action_ctrl_r_project_non_worktree_displays_warning(
     invocations = stub.invocations()  # type: ignore[attr-defined]
     assert any(
         inv[:2] == ["tmux", "display-message"] and "ctrl-r: not a linked worktree" in inv for inv in invocations
-    ), invocations
-
-
-def test_remove_session_row_drops_matching_sid() -> None:
-    lines = ["s\t3\talpha\talpha", "s\t4\tbeta\tbeta", "p\t/p/x\tx\tx"]
-    assert remove_session_row(lines, sid="3") == ["s\t4\tbeta\tbeta", "p\t/p/x\tx\tx"]
-
-
-def test_remove_session_row_no_match_returns_lines_unchanged() -> None:
-    lines = ["p\t/p/x\tx\tx"]
-    assert remove_session_row(lines, sid="9") == lines
-
-
-def test_remove_project_row_drops_matching_path() -> None:
-    lines = ["p\t/p/foo\tfoo\tfoo", "p\t/p/bar\tbar\tbar"]
-    assert remove_project_row(lines, path="/p/foo") == ["p\t/p/bar\tbar\tbar"]
-
-
-def test_cli_action_ctrl_d_session_with_worktree_kills_and_removes(
-    cli_env: Path,
-    tmp_path: Path,
-    tmux_stub: Callable[..., object],
-    make_repo: Callable[..., Path],
-    worktree_add: Callable[..., None],
-    entries_file: Callable[[str], Path],
-) -> None:
-    repo = make_repo("r", with_remote=True)
-    wt = tmp_path / "wt" / "feature"
-    worktree_add(repo, wt, "feature", new_branch=True)
-    stub = tmux_stub(sessions=f"feature\t$5\t{wt}")
-    tmpfile = entries_file("s\t5\tfeature\tfeature\np\t/other/proj\tother\tother\n")
-
-    rc = main(["_internal", "session-action", "ctrl-d", "s", "5", str(tmpfile)])
-    assert rc == 0
-
-    out = tmpfile.read_text()
-    assert "s\t5\t" not in out
-    assert "p\t/other/proj" in out
-    invocations = stub.invocations()  # type: ignore[attr-defined]
-    assert any(inv[:4] == ["tmux", "kill-session", "-t", "$5"] for inv in invocations), invocations
-    assert not wt.exists()
-
-
-def test_cli_action_ctrl_d_session_only_path_kills_and_strips(
-    cli_env: Path,
-    tmp_path: Path,
-    tmux_stub: Callable[..., object],
-    entries_file: Callable[[str], Path],
-) -> None:
-    plain = tmp_path / "plain"
-    plain.mkdir()
-    stub = tmux_stub(sessions=f"plain\t$7\t{plain}")
-    tmpfile = entries_file("s\t7\tplain\tplain\np\t/other/proj\tother\tother\n")
-
-    rc = main(["_internal", "session-action", "ctrl-d", "s", "7", str(tmpfile)])
-    assert rc == 0
-
-    out = tmpfile.read_text()
-    assert "s\t7\t" not in out
-    assert "p\t/other/proj" in out
-    invocations = stub.invocations()  # type: ignore[attr-defined]
-    assert any(inv[:4] == ["tmux", "kill-session", "-t", "$7"] for inv in invocations), invocations
-
-
-def test_cli_action_ctrl_d_project_linked_worktree_removes(
-    cli_env: Path,
-    tmp_path: Path,
-    make_repo: Callable[..., Path],
-    worktree_add: Callable[..., None],
-    entries_file: Callable[[str], Path],
-) -> None:
-    repo = make_repo("r", with_remote=True)
-    wt = tmp_path / "wt" / "feature"
-    worktree_add(repo, wt, "feature", new_branch=True)
-    tmpfile = entries_file(f"p\t{wt}\tfeature\tfeature\np\t/other/proj\tother\tother\n")
-
-    rc = main(["_internal", "session-action", "ctrl-d", "p", str(wt), str(tmpfile)])
-    assert rc == 0
-
-    out = tmpfile.read_text()
-    assert str(wt) not in out
-    assert "/other/proj" in out
-    assert not wt.exists()
-
-
-@pytest.mark.parametrize(
-    ("answer", "expect_orphan", "extra_row"),
-    [
-        ("Yes", False, "p\t/other\tother\tother\n"),
-        ("No", True, ""),
-    ],
-)
-def test_cli_action_ctrl_d_orphan_dir_respects_confirm(
-    cli_env: Path,
-    tmp_path: Path,
-    fzf_stub: object,
-    make_repo: Callable[..., Path],
-    entries_file: Callable[[str], Path],
-    answer: str,
-    expect_orphan: bool,
-    extra_row: str,
-) -> None:
-    """ctrl-d on an orphan dir prompts via fzf; Yes deletes, No keeps."""
-    make_repo("wt/realrepo")
-    orphan = tmp_path / "wt" / "orphan"
-    orphan.mkdir(parents=True)
-    fzf_stub.respond(answer)  # type: ignore[attr-defined]
-    tmpfile = entries_file(f"p\t{orphan}\torphan\torphan\n{extra_row}")
-
-    rc = main(["_internal", "session-action", "ctrl-d", "p", str(orphan), str(tmpfile)])
-    assert rc == 0
-
-    assert orphan.exists() is expect_orphan
-    assert (str(orphan) in tmpfile.read_text()) is expect_orphan
-
-
-def test_cli_action_ctrl_d_non_orphan_non_worktree_displays_message(
-    cli_env: Path,
-    tmp_path: Path,
-    tmux_stub: Callable[..., object],
-    entries_file: Callable[[str], Path],
-) -> None:
-    notes = tmp_path / "lonely" / "notes"
-    notes.mkdir(parents=True)
-    stub = tmux_stub()
-    tmpfile = entries_file(f"p\t{notes}\tnotes\tnotes\n")
-
-    rc = main(["_internal", "session-action", "ctrl-d", "p", str(notes), str(tmpfile)])
-    assert rc == 0
-
-    assert notes.exists()
-    invocations = stub.invocations()  # type: ignore[attr-defined]
-    assert any(
-        inv[:2] == ["tmux", "display-message"] and "ctrl-d: not a linked worktree" in inv for inv in invocations
     ), invocations
 
 

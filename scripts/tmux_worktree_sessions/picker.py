@@ -7,9 +7,8 @@ This module owns every interactive flow the user can land in:
   session-picker ctrl-w handler and the standalone worktree command).
 * :func:`pick_branch` — single-shot branch picker (returns a
   :class:`BranchChoice`).
-* :func:`prompt_rename`, :func:`prompt_new_session_name`,
-  :func:`confirm_orphan_delete` — small inline UIs reused across the
-  CLI handlers.
+* :func:`prompt_rename`, :func:`prompt_new_session_name` — small inline
+  UIs reused across the CLI handlers.
 
 Each function has a single responsibility; the multi-step flows
 compose them. Pure pieces (entry generation, layout resolution) sit
@@ -22,7 +21,6 @@ from __future__ import annotations
 import contextlib
 import secrets
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -53,14 +51,11 @@ GREEN = "\033[38;2;166;227;161m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
-_BRANCH_HEADER = "enter:checkout  ctrl-bs:back  ctrl-f:refresh"
+_BRANCH_HEADER = "enter:checkout  ctrl-bs:back  ctrl-f:refresh  ctrl-x:delete-worktree"
 _NEW_NAME_HEADER = "enter:create  ctrl-bs:back"
-_SESSION_HEADER = (
-    "enter:open ctrl-bs:back ?:preview ctrl-x:delete-session ctrl-r:rename ctrl-w:worktree ctrl-d:remove-worktree"
-)
+_SESSION_HEADER = "enter:open ctrl-bs:back ?:preview ctrl-x:delete-session ctrl-r:rename ctrl-w:worktree"
 _RENAME_HEADER = "enter:rename  ctrl-bs:cancel"
 _NEW_SESSION_HEADER = "enter:create  ctrl-bs:cancel"
-_ORPHAN_DELETE_HEADER = "directory is not git-linked — delete anyway?"
 
 # Listen-port range fzf binds to during the branch picker. Avoids the
 # 0–51199 well-known range and stays under the ephemeral ceiling.
@@ -74,14 +69,13 @@ __all__ = [
     "GRAY",
     "GREEN",
     "RESET",
+    "branch_action_ctrl_x",
     "build_session_entries_iter",
     "bump_score_and_switch",
-    "confirm_orphan_delete",
     "fetch_reload_argv",
     "gen_branch_picker_entries",
     "open_worktree_picker",
     "pick_branch",
-    "picker_action_ctrl_d",
     "picker_action_ctrl_r",
     "picker_action_ctrl_x",
     "prompt_new_session_name",
@@ -139,14 +133,6 @@ def prompt_new_session_name() -> str:
     if result.cancelled:
         return ""
     return text.sanitize_name(result.query)
-
-
-def confirm_orphan_delete(wt_path: str) -> bool:
-    """Drive the inline No/Yes fzf prompt for orphan-dir deletion."""
-    return fzf.confirm(
-        prompt_label=f"Delete {Path(wt_path).name}? ",
-        header=_ORPHAN_DELETE_HEADER,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -345,21 +331,41 @@ def _build_ctrl_f_bind(
     return f"ctrl-f:change-header({_BRANCH_HEADER} ⟳ fetching...)+execute-silent({args})"
 
 
+def _build_branch_ctrl_x_bind(repo: Path, tmpfile: Path) -> str:
+    """Compose the ``ctrl-x`` bind that removes the selected branch's worktree.
+
+    Shells out to ``_internal branch-action ctrl-x <repo> <branch> <tmpfile>``
+    with ``{1}`` (the branch name from column 1 of the entry row), then
+    reloads the rewritten tmpfile and restores the selection position.
+    Rows without a backing worktree are no-ops on the action side.
+    """
+    action_cmd = (
+        f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions _internal branch-action ctrl-x "
+        f"{shlex.quote(str(repo))} {{1}} {shlex.quote(str(tmpfile))}"
+    )
+    return f"ctrl-x:execute-silent({action_cmd})+reload(cat {shlex.quote(str(tmpfile))})+pos({{n}})"
+
+
 def _branch_pick_round(
     *,
     tmpfile: Path,
     initial_header: str,
     listen_port: int,
     ctrl_f_bind: str,
+    ctrl_x_bind: str,
 ) -> fzf.PickerSelection:
     """Run one fzf round of the branch picker reading from ``tmpfile``."""
-    branch_picker = fzf.Picker(
-        prompt_label="Branch > ",
-        header=initial_header,
-        with_nth="2",
-        expect="ctrl-bs",
-        listen_port=listen_port,
-    ).bind(ctrl_f_bind)
+    branch_picker = (
+        fzf.Picker(
+            prompt_label="Branch > ",
+            header=initial_header,
+            with_nth="2",
+            expect="ctrl-bs",
+            listen_port=listen_port,
+        )
+        .bind(ctrl_f_bind)
+        .bind(ctrl_x_bind)
+    )
     with tmpfile.open("rb") as input_f:
         return branch_picker.run(stdin=input_f)
 
@@ -423,6 +429,7 @@ def pick_branch(
         fetch_window_secs=fetch_window_secs,
     )
     ctrl_f_bind = _build_ctrl_f_bind(fetch_reload_argv, repo, tmpfile, listen_port)
+    ctrl_x_bind = _build_branch_ctrl_x_bind(repo, tmpfile)
 
     try:
         while True:
@@ -431,6 +438,7 @@ def pick_branch(
                 initial_header=initial_header,
                 listen_port=listen_port,
                 ctrl_f_bind=ctrl_f_bind,
+                ctrl_x_bind=ctrl_x_bind,
             )
             initial_header = _BRANCH_HEADER
 
@@ -597,7 +605,7 @@ def run_session_picker(tmpfile: Path, *, cfg: Config) -> int:
 
 def _build_session_picker(tmpfile: Path) -> fzf.Picker:
     """Construct the session picker with all action key binds wired up."""
-    bind_d, bind_x, bind_r = _build_session_action_binds(tmpfile)
+    bind_x, bind_r = _build_session_action_binds(tmpfile)
     # Preview target is `'$'{2}`, not `'\$'{2}`: inside single quotes
     # the backslash survives literally, and tmux rejects `\$<sid>` with
     # "can't find pane".
@@ -617,14 +625,13 @@ def _build_session_picker(tmpfile: Path) -> fzf.Picker:
             extra_flags=("--tiebreak=index",),
         )
         .bind("?:toggle-preview")
-        .bind(bind_d)
         .bind(bind_x)
         .bind(bind_r)
     )
 
 
-def _build_session_action_binds(tmpfile: Path) -> tuple[str, str, str]:
-    """Build the ctrl-d / ctrl-x / ctrl-r binds that re-invoke the dispatcher.
+def _build_session_action_binds(tmpfile: Path) -> tuple[str, str]:
+    """Build the ctrl-x / ctrl-r binds that re-invoke the dispatcher.
 
     Each bind shells out to ``python3 -m tmux_worktree_sessions _internal
     session-action <key>`` — the internal hatch the picker uses to call
@@ -644,7 +651,6 @@ def _build_session_action_binds(tmpfile: Path) -> tuple[str, str, str]:
         )
 
     return (
-        _bind("ctrl-d", "execute"),
         _bind("ctrl-x", "execute-silent"),
         _bind("ctrl-r", "execute"),
     )
@@ -697,15 +703,15 @@ def _resolve_ctrl_w_repo(*, row_type: str, key2: str) -> Path | None:
 
 
 # ---------------------------------------------------------------------------
-# CLI action handlers (``picker_action_*``)
+# CLI action handlers (``picker_action_*`` and ``branch_action_*``)
 #
-# Reached only via the ``_internal session-action <key>`` subcommand,
-# which fzf's ctrl-x / ctrl-r / ctrl-d binds inside the session picker
-# spawn (see ``_build_session_action_binds``). Each one mutates the
-# picker's shared entries tmpfile in place so the fzf ``reload(cat ...)``
-# rebind pulls the fresh row set on return. The ``picker_action_*``
-# prefix marks the functions the CLI hatch dispatches to — keep them
-# grouped so the boundary stays obvious.
+# Reached only via the ``_internal session-action <key>`` and
+# ``_internal branch-action <key>`` subcommands, which fzf's ctrl-x /
+# ctrl-r binds inside the running pickers spawn (see
+# ``_build_session_action_binds`` and ``_build_branch_ctrl_x_bind``).
+# Each one mutates the picker's shared entries tmpfile in place so the
+# fzf ``reload(cat ...)`` rebind pulls the fresh row set on return.
+# Keep the action functions grouped so the boundary stays obvious.
 # ---------------------------------------------------------------------------
 
 
@@ -769,18 +775,8 @@ def picker_action_ctrl_r(*, row_type: str, row_id: str, tmpfile: Path, cfg: Conf
     return 0
 
 
-def picker_action_ctrl_d(*, row_type: str, row_id: str, tmpfile: Path, cfg: Config) -> int:
-    """Kill a session and/or remove its worktree; prompt on orphaned dirs."""
-    del cfg  # accepted for handler symmetry; ctrl-d does not consume config
-    if row_type == "s":
-        return _ctrl_d_session_row(row_id, tmpfile)
-    if row_type == "p":
-        return _ctrl_d_project_row(row_id, tmpfile)
-    return 0
-
-
 def _resolve_action_target(row_type: str, row_id: str) -> str | None:
-    """Return the filesystem target of a ctrl-r/ctrl-d action row, or None."""
+    """Return the filesystem target of a ctrl-r action row, or None."""
     if row_type == "s":
         return tmux.session_path(f"${row_id}")
     if row_type == "p":
@@ -834,52 +830,56 @@ def _find_session_clean_name(lines: list[str], sid: str) -> str:
     return ""
 
 
-def _ctrl_d_session_row(sid: str, tmpfile: Path) -> int:
-    """Kill the tmux session, drop its row, and remove its worktree if linked."""
-    tmux_id = f"${sid}"
-    sess_path = tmux.session_path(tmux_id)
-    tmux.kill_session(tmux_id)
+def branch_action_ctrl_x(
+    *,
+    repo: Path,
+    branch: str,
+    tmpfile: Path,
+    icons: IconSet,
+    home: str = "",
+    strip_prefixes: list[str] | None = None,
+) -> int:
+    """Remove the worktree backing ``branch`` (if any) and rewrite ``tmpfile``.
 
-    lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
-    new_lines = sessions.remove_session_row(lines, sid=sid)
-    tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
-
-    sess = Path(sess_path)
-    if git.is_linked_worktree(sess):
-        wt_repo = git.toplevel(sess)
-        if wt_repo is not None:
-            git.worktree_remove(wt_repo, sess_path)
-    return 0
-
-
-def _ctrl_d_project_row(wt_path: str, tmpfile: Path) -> int:
-    """Drop the project row; remove its worktree (or an orphan dir after confirm)."""
-    wt = Path(wt_path)
-    if not git.is_linked_worktree(wt):
-        return _ctrl_d_orphan_or_flash(wt, wt_path, tmpfile)
-
-    wt_repo = git.toplevel(wt)
-    if wt_repo is None:
+    Rows without a backing worktree (plain branches, remote-only,
+    ``[new]``) are no-ops. When the worktree is currently open as a tmux
+    session, the session is killed first so ``git worktree remove`` does
+    not refuse on a busy directory. The branch itself is never deleted —
+    branches are first-class git objects and the picker only manages
+    worktree lifecycle.
+    """
+    if not branch or branch == "[new]":
+        tmux.flash_message("ctrl-x: select a branch with a worktree to delete")
         return 0
-    _drop_project_row(tmpfile, wt_path)
-    git.worktree_remove(wt_repo, wt_path)
-    return 0
-
-
-def _ctrl_d_orphan_or_flash(wt: Path, wt_path: str, tmpfile: Path) -> int:
-    """Either confirm-and-rmtree an orphan worktree, or flash an error."""
-    if not sessions.is_orphaned_worktree(wt, container=wt.parent):
-        tmux.flash_message("ctrl-d: not a linked worktree")
+    worktrees = git.list_worktrees(repo)
+    branch_paths = {wt.branch: wt.path for wt in worktrees}
+    wt_path = branch_paths.get(branch)
+    if wt_path is None:
+        tmux.flash_message(f"ctrl-x: {branch} has no worktree")
         return 0
-    if not confirm_orphan_delete(wt_path):
+    if worktrees and wt_path == worktrees[0].path:
+        # ``git worktree list`` always reports the main checkout first.
+        # Removing it would orphan every linked worktree, and ``git
+        # worktree remove`` refuses anyway — short-circuit with a flash
+        # so the user gets feedback instead of a silent no-op.
+        tmux.flash_message(f"ctrl-x: {branch} is the main worktree — cannot delete")
         return 0
-    _drop_project_row(tmpfile, wt_path)
-    shutil.rmtree(wt_path, ignore_errors=True)
+
+    sessions_by_path = {s.path: s for s in tmux.list_sessions()}
+    sess = sessions_by_path.get(wt_path)
+    if sess is not None:
+        tmux.kill_session(f"${sess.sid}")
+
+    git.worktree_remove(repo, wt_path)
+
+    rebuilt = list(
+        gen_branch_picker_entries(
+            repo,
+            icons=icons,
+            home=home,
+            strip_prefixes=strip_prefixes,
+            session_paths=frozenset(p for p in sessions_by_path if p != wt_path),
+        )
+    )
+    tmpfile.write_text("\n".join(rebuilt) + ("\n" if rebuilt else ""))
     return 0
-
-
-def _drop_project_row(tmpfile: Path, wt_path: str) -> None:
-    """Rewrite ``tmpfile`` with the project row for ``wt_path`` removed."""
-    lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
-    new_lines = sessions.remove_project_row(lines, path=wt_path)
-    tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
