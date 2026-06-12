@@ -17,17 +17,17 @@ report issues, propose changes, and get a PR merged.
 The full setup lives in [BUILD.md](BUILD.md). Quick version:
 
 ```sh
-devenv shell    # enter the dev shell (uv sync runs automatically)
-devenv test     # run every check (what CI runs)
+nix develop    # enter the dev shell (uv sync runs automatically)
+./check.sh     # run every check (what CI runs)
 ```
 
 Tighter feedback loops:
 
 ```sh
-uv run pytest tests/python/test_score.py    # one pytest file
-uv run pytest tests/python -k worktree      # filter by name
-devenv tasks run python:typecheck           # mypy --strict
-devenv tasks run shellcheck:lint            # shellcheck on the .tmux file
+uv run pytest tests/python/test_score.py                      # one pytest file
+uv run pytest tests/python -k worktree                        # filter by name
+uv run mypy scripts/tmux_worktree_sessions                    # mypy --strict
+shellcheck --severity=warning tmux-worktree-sessions.tmux     # shellcheck on the .tmux file
 ```
 
 ## Change policy
@@ -45,8 +45,8 @@ Every bug fix and every new feature MUST:
 4. **Update `README.md`** if the change affects user-visible behaviour
    (key bindings, options, picker columns, etc.).
 
-A change is not done until `devenv test` is green. The same command
-runs in CI on Linux and macOS for every push and pull request.
+A change is not done until `./check.sh` is green. The same checks
+run in CI on Linux and macOS for every push and pull request.
 
 Where new code lands:
 

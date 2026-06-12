@@ -165,13 +165,13 @@ For each repo the plugin looks at the existing linked worktrees:
 
 ## 🛠️  Development
 
-The dev environment is driven by [devenv](https://devenv.sh/) and uses
-`uv` for Python deps. After installing [Nix](https://nixos.org/download)
-and devenv:
+The dev environment is a Nix flake driven by `uv` for Python deps.
+After installing [Nix](https://nixos.org/download) (with flakes
+enabled):
 
 ```sh
-devenv shell    # enter the dev shell (uv sync runs automatically)
-devenv test     # run every check (what CI runs)
+nix develop    # enter the dev shell (uv sync runs automatically)
+./check.sh     # run every check (what CI runs)
 ```
 
 Inside the dev shell, the package exposes a `tws` console script for
