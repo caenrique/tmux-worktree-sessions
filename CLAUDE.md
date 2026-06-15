@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development
 
-See [BUILD.md](BUILD.md) for the full dev setup: `devenv shell`,
-`devenv test`, individual task names, dependency management, lint
+See [BUILD.md](BUILD.md) for the full dev setup: `nix develop`,
+`./check.sh`, individual commands, dependency management, lint
 configuration, and test layout. Quick reference:
 
 ```sh
-devenv shell                              # enter dev shell (uv sync runs automatically)
-devenv test                               # run every check (what CI runs)
-devenv tasks run python:test              # one task at a time
+nix develop                               # enter dev shell (uv sync runs automatically)
+./check.sh                                # run every check (what CI runs)
+uv run pytest tests/python                # pytest only
 uv run pytest tests/python/test_score.py  # one pytest file
 uv run pytest tests/python -k worktree    # filter by name
 ```
@@ -29,15 +29,15 @@ Every bug fix and every new feature MUST:
 
 1. Update `tests/python/` to cover the changed behaviour, and `uv run pytest tests/python` MUST pass.
 2. Run shellcheck on `tmux-worktree-sessions.tmux` if you touched it, and address every warning before commit. Suppress with `# shellcheck disable=SC####` only when the warning is a known false positive, and include a comment explaining why.
-3. Before committing, linting and formatting MUST pass. Run `devenv tasks run python:lint`, `devenv tasks run python:format-check`, and `devenv tasks run python:typecheck` (or `devenv test` for everything). If `python:format-check` reports diffs, run `devenv tasks run python:format` to apply them, then commit.
+3. Before committing, linting and formatting MUST pass. Run `uv run ruff check scripts/ tests/python`, `uv run ruff format --check scripts/ tests/python`, and `uv run mypy scripts/tmux_worktree_sessions` (or `./check.sh` for everything). If the format check reports diffs, run `uv run ruff format scripts/ tests/python` to apply them, then commit.
 
-A change is not done until `devenv test` is green.
+A change is not done until `./check.sh` is green.
 
 - New function in `scripts/tmux_worktree_sessions/<module>.py` → add cases to `tests/python/test_<module>.py`.
 - New external dependency invoked by the package → add a programmable stub under `tests/python/_stubs/` and a fixture hook in `tests/python/conftest.py`.
 - Regression fixes → add a failing test first, then make it pass.
 
-CI runs `devenv test` on Linux and macOS for every push and pull request via `.github/workflows/tests.yml` — that runs the Python checks and shellcheck together.
+CI runs `nix develop --command ./check.sh` on Linux and macOS for every push and pull request via `.github/workflows/tests.yml` — that runs the Python checks and shellcheck together.
 
 ## Architecture
 

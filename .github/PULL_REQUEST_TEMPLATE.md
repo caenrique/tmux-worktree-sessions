@@ -12,7 +12,7 @@
 
 ## Test plan
 
-- [ ] `devenv test` passes locally
+- [ ] `./check.sh` passes locally
 - [ ] Tests added or updated under `tests/python/`
 - [ ] `mypy --strict` is clean
 - [ ] `shellcheck` is clean (only required if `tmux-worktree-sessions.tmux` changed)

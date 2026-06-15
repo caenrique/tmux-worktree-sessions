@@ -8,10 +8,9 @@ build/
 dist/
 .venv/
 
-# Devenv
-.devenv*
-devenv.local.nix
-devenv.local.yaml
+# Nix
+result
+result-*
 
 # direnv
 .direnv
