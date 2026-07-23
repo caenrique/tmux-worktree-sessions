@@ -277,6 +277,38 @@ def test_cli_action_ctrl_x_non_session_is_noop(
     assert tmpfile.read_text() == before
 
 
+def test_cli_action_ctrl_x_closes_tree_pane_and_refreshes_view(
+    cli_env: Path,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+) -> None:
+    rootfile = tmp_path / "roots"
+    viewfile = tmp_path / "view"
+    statefile = tmp_path / "state"
+    rootfile.write_text("s\t3\talpha\talpha\n")
+    statefile.write_text('{"expanded_sessions":["3"],"expanded_windows":["@4"]}\n')
+    stub = tmux_stub(sessions="alpha\t$3\t/p/alpha")
+
+    rc = main(
+        [
+            "_internal",
+            "session-action",
+            "ctrl-x",
+            "t",
+            "%9",
+            str(rootfile),
+            "3",
+            "@4",
+            str(viewfile),
+            str(statefile),
+        ]
+    )
+
+    assert rc == 0
+    assert ["tmux", "kill-pane", "-t", "%9"] in stub.invocations()
+    assert viewfile.read_text().startswith("s\t3\talpha\t▾ ")
+
+
 def _build_entries_lines(
     *,
     projects_roots: list[Path],
@@ -584,12 +616,16 @@ def test_cli_manage_invokes_fzf_with_popup_args(
     # `--nth 3` matches zero rows once the view collapses to a single field.
     assert "--with-nth" in flat and flat[flat.index("--with-nth") + 1] == "4"
     assert "--nth" not in flat
-    # Preview must use single-quoted `'$'` (not `'\$'`) so the shell passes
-    # `$<sid>` through to tmux. With backslash escaping, tmux rejects
-    # `\$<sid>` with "can't find pane".
+    # Every tree row carries an exact preview target in hidden column 7:
+    # $session, @window, or %pane. The one preview command works for all.
     preview_idx = flat.index("--preview")
-    assert "'$'{2}" in flat[preview_idx + 1]
-    assert "'\\$'" not in flat[preview_idx + 1]
+    assert "s|w|t)" in flat[preview_idx + 1]
+    assert "-t {7}" in flat[preview_idx + 1]
+    bind_tokens = [token for token in flat if token.startswith("tab:")]
+    assert bind_tokens
+    assert "tree-toggle" in bind_tokens[0]
+    assert "reload(cat " in bind_tokens[0]
+    assert "--no-sort" in flat
 
 
 # ── End-to-end ``sessions manage`` enter-on-row flows ─────────────────────────
@@ -640,6 +676,47 @@ def test_cli_manage_enter_on_session_switches_client(
 
     invocations = stub.invocations()  # type: ignore[attr-defined]
     assert any(call[:4] == ["tmux", "switch-client", "-t", "$3"] for call in invocations), invocations
+
+
+def test_cli_manage_enter_on_window_selects_window_then_session(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+    fzf_stub: object,
+) -> None:
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setenv("TWS_PROJECTS_DIRS", str(projects_dir))
+    stub = tmux_stub(sessions="alpha\t$3\t/p/alpha")
+    fzf_stub.respond("\nw\t@4\talpha editor\twindow 1: editor\t3\t@4\t@4\t")  # type: ignore[attr-defined]
+
+    assert main(["sessions", "manage"]) == 0
+
+    invocations = stub.invocations()
+    assert ["tmux", "select-window", "-t", "@4"] in invocations
+    assert ["tmux", "switch-client", "-t", "$3"] in invocations
+
+
+def test_cli_manage_enter_on_pane_selects_exact_window_and_pane(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+    fzf_stub: object,
+) -> None:
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    monkeypatch.setenv("TWS_PROJECTS_DIRS", str(projects_dir))
+    stub = tmux_stub(sessions="alpha\t$3\t/p/alpha")
+    fzf_stub.respond("\nt\t%9\talpha editor nvim\tpane 1: nvim\t3\t@4\t%9\t")  # type: ignore[attr-defined]
+
+    assert main(["sessions", "manage"]) == 0
+
+    invocations = stub.invocations()
+    assert ["tmux", "select-window", "-t", "@4"] in invocations
+    assert ["tmux", "select-pane", "-t", "%9"] in invocations
+    assert ["tmux", "switch-client", "-t", "$3"] in invocations
 
 
 def test_cli_manage_enter_on_new_sentinel_prompts_for_name_and_creates(

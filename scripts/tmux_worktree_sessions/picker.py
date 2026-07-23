@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import fzf, git, pull_requests, score, sessions, text, tmux
+from . import fzf, git, pull_requests, score, session_tree, sessions, text, tmux
 from .icons import IconSet
 
 if TYPE_CHECKING:
@@ -54,7 +54,7 @@ RESET = "\033[0m"
 _BRANCH_HEADER = "enter:checkout  ctrl-bs:back  ctrl-f:refresh  ctrl-x:delete-worktree"
 _PR_FILTER_HINT = "  ctrl-p:pull-requests"
 _NEW_NAME_HEADER = "enter:create  ctrl-bs:back"
-_SESSION_HEADER = "enter:open ctrl-bs:back ?:preview ctrl-x:delete-session ctrl-r:rename ctrl-w:worktree"
+_SESSION_HEADER = "enter:open tab:expand ctrl-bs:back ?:preview ctrl-x:delete ctrl-r:rename ctrl-w:worktree"
 _RENAME_HEADER = "enter:rename  ctrl-bs:cancel"
 _NEW_SESSION_HEADER = "enter:create  ctrl-bs:cancel"
 
@@ -646,14 +646,24 @@ def _add_worktree_for_choice(
 # ---------------------------------------------------------------------------
 
 
-def run_session_picker(tmpfile: Path, *, cfg: Config) -> int:
+def run_session_picker(
+    tmpfile: Path,
+    *,
+    cfg: Config,
+    rootfile: Path | None = None,
+    statefile: Path | None = None,
+) -> int:
     """Run the top-level session picker fzf loop until the user commits.
 
     Reads picker rows from ``tmpfile`` and acts on each user selection
     (open, switch, ctrl-w to open a worktree, etc.). Returns the exit
     code the CLI handler should propagate.
     """
-    picker_obj = _build_session_picker(tmpfile)
+    picker_obj = _build_session_picker(
+        tmpfile,
+        rootfile=rootfile or tmpfile,
+        statefile=statefile,
+    )
 
     while True:
         with tmpfile.open("rb") as input_f:
@@ -667,18 +677,25 @@ def run_session_picker(tmpfile: Path, *, cfg: Config) -> int:
         # Selection didn't terminate the loop — re-prompt.
 
 
-def _build_session_picker(tmpfile: Path) -> fzf.Picker:
+def _build_session_picker(
+    tmpfile: Path,
+    *,
+    rootfile: Path | None = None,
+    statefile: Path | None = None,
+) -> fzf.Picker:
     """Construct the session picker with all action key binds wired up."""
-    bind_x, bind_r = _build_session_action_binds(tmpfile)
-    # Preview target is `'$'{2}`, not `'\$'{2}`: inside single quotes
-    # the backslash survives literally, and tmux rejects `\$<sid>` with
-    # "can't find pane".
-    preview_cmd = "[ '{1}' = s ] && tmux capture-pane -e -p -t '$'{2} 2>/dev/null || ls '{2}' 2>/dev/null"
+    rootfile = rootfile or tmpfile
+    bind_x, bind_r = _build_session_action_binds(
+        rootfile,
+        viewfile=tmpfile if statefile is not None else None,
+        statefile=statefile,
+    )
+    preview_cmd = "case {1} in p) ls {2} 2>/dev/null ;; s|w|t) tmux capture-pane -e -p -t {7} 2>/dev/null ;; esac"
     # No ``--nth`` is set on the picker: fzf indexes ``--nth`` into the
     # post-``--with-nth`` view, so any value finds nothing once
     # ``--with-nth 4`` collapses each row to a single field. We rely on
     # ``--ansi`` stripping SGR codes from field 4 before matching.
-    return (
+    picker_obj = (
         fzf.Picker(
             prompt_label="Sessions > ",
             header=_SESSION_HEADER,
@@ -686,15 +703,33 @@ def _build_session_picker(tmpfile: Path) -> fzf.Picker:
             expect="ctrl-w,ctrl-bs",
             preview=preview_cmd,
             preview_window="down:50%:border-top:nofollow:hidden",
-            extra_flags=("--tiebreak=index",),
+            extra_flags=("--no-sort", "--tiebreak=index"),
         )
         .bind("?:toggle-preview")
         .bind(bind_x)
         .bind(bind_r)
     )
+    if statefile is not None:
+        picker_obj.bind(_build_tree_toggle_bind(rootfile, tmpfile, statefile))
+    return picker_obj
 
 
-def _build_session_action_binds(tmpfile: Path) -> tuple[str, str]:
+def _build_tree_toggle_bind(rootfile: Path, viewfile: Path, statefile: Path) -> str:
+    prefix = f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions _internal tree-toggle "
+    command = (
+        f"{prefix}{{1}} {{2}} {{5}} "
+        f"{shlex.quote(str(rootfile))} {shlex.quote(str(viewfile))} "
+        f"{shlex.quote(str(statefile))}"
+    )
+    return f"tab:execute-silent({command})+reload(cat {shlex.quote(str(viewfile))})+pos({{n}})"
+
+
+def _build_session_action_binds(
+    tmpfile: Path,
+    *,
+    viewfile: Path | None = None,
+    statefile: Path | None = None,
+) -> tuple[str, str]:
     """Build the ctrl-x / ctrl-r binds that re-invoke the dispatcher.
 
     Each bind shells out to ``python3 -m tmux_worktree_sessions _internal
@@ -707,11 +742,17 @@ def _build_session_action_binds(tmpfile: Path) -> tuple[str, str]:
     """
     action_cmd_prefix = f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions _internal session-action "
     quoted_tmpfile = shlex.quote(str(tmpfile))
+    tree_args = ""
+    reload_file = tmpfile
+    if viewfile is not None and statefile is not None:
+        tree_args = f" {{5}} {{6}} {shlex.quote(str(viewfile))} {shlex.quote(str(statefile))}"
+        reload_file = viewfile
 
     def _bind(key: str, exec_form: str) -> str:
         return (
-            f"{key}:{exec_form}({action_cmd_prefix}{key} {{1}} {{2}} {quoted_tmpfile})"
-            f"+reload(cat {quoted_tmpfile})+pos({{n}})"
+            f"{key}:{exec_form}({action_cmd_prefix}{key} {{1}} {{2}} "
+            f"{quoted_tmpfile}{tree_args})"
+            f"+reload(cat {shlex.quote(str(reload_file))})+pos({{n}})"
         )
 
     return (
@@ -726,9 +767,16 @@ def _dispatch_session_selection(selection: fzf.PickerSelection, *, cfg: Config) 
     row_type = fields[0] if fields else ""
     key2 = fields[1] if len(fields) > 1 else ""
     search = fields[2] if len(fields) > 2 else ""
+    session_id = fields[4] if len(fields) > 4 else ""
+    window_id = fields[5] if len(fields) > 5 else ""
 
     if selection.key == "ctrl-w":
-        return _handle_session_picker_ctrl_w(row_type=row_type, key2=key2, cfg=cfg)
+        return _handle_session_picker_ctrl_w(
+            row_type=row_type,
+            key2=key2,
+            session_id=session_id,
+            cfg=cfg,
+        )
 
     if row_type == "n":
         new_name = prompt_new_session_name()
@@ -744,24 +792,52 @@ def _dispatch_session_selection(selection: fzf.PickerSelection, *, cfg: Config) 
     if row_type == "s":
         tmux.switch_client(f"${key2}")
         return True
+    if row_type == "w" and session_id:
+        tmux.select_window(key2)
+        tmux.switch_client(f"${session_id}")
+        return True
+    if row_type == "t" and session_id:
+        if window_id:
+            tmux.select_window(window_id)
+        tmux.select_pane(key2)
+        tmux.switch_client(f"${session_id}")
+        return True
 
     return False
 
 
-def _handle_session_picker_ctrl_w(*, row_type: str, key2: str, cfg: Config) -> bool:
+def _handle_session_picker_ctrl_w(
+    *,
+    row_type: str,
+    key2: str,
+    session_id: str = "",
+    cfg: Config,
+) -> bool:
     """Drive the ctrl-w (create-worktree) flow; return True to exit the loop."""
-    repo_path = _resolve_ctrl_w_repo(row_type=row_type, key2=key2)
+    repo_path = _resolve_ctrl_w_repo(
+        row_type=row_type,
+        key2=key2,
+        session_id=session_id,
+    )
     if repo_path is None:
         return False
     return open_worktree_picker(repo_path, cfg=cfg)
 
 
-def _resolve_ctrl_w_repo(*, row_type: str, key2: str) -> Path | None:
+def _resolve_ctrl_w_repo(
+    *,
+    row_type: str,
+    key2: str,
+    session_id: str = "",
+) -> Path | None:
     """Map the picker row's type+key to a repo path, or None for invalid rows."""
     if row_type == "p":
         return git.toplevel(Path(key2))
     if row_type == "s":
         sess_path = tmux.session_path(f"${key2}")
+        return git.toplevel(Path(sess_path)) if sess_path else None
+    if row_type in ("w", "t") and session_id:
+        sess_path = tmux.session_path(f"${session_id}")
         return git.toplevel(Path(sess_path)) if sess_path else None
     return None
 
@@ -808,35 +884,90 @@ def build_session_entries_iter(cfg: Config) -> Iterator[str]:
     )
 
 
-def picker_action_ctrl_x(*, row_type: str, row_id: str, tmpfile: Path, cfg: Config) -> int:
-    """Kill the tmux session and convert its row to a project row."""
-    if row_type != "s":
+def picker_action_ctrl_x(
+    *,
+    row_type: str,
+    row_id: str,
+    tmpfile: Path,
+    cfg: Config,
+    session_id: str = "",
+    window_id: str = "",
+    viewfile: Path | None = None,
+    statefile: Path | None = None,
+) -> int:
+    """Close a selected session/window/pane and refresh the tree."""
+    del window_id
+    if row_type not in ("s", "w", "t"):
         return 0
-    tmux_id = f"${row_id}"
-    sess_path = tmux.session_path(tmux_id)
-    tmux.kill_session(tmux_id)
-
-    lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
-    new_lines = sessions.apply_ctrl_x(lines, sid=row_id, sess_path=sess_path, icons=cfg.icons)
-    tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+    if row_type == "s":
+        tmux_id = f"${row_id}"
+        sess_path = tmux.session_path(tmux_id)
+        tmux.kill_session(tmux_id)
+        lines = tmpfile.read_text().splitlines() if tmpfile.exists() else []
+        new_lines = sessions.apply_ctrl_x(
+            lines,
+            sid=row_id,
+            sess_path=sess_path,
+            icons=cfg.icons,
+        )
+        tmpfile.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+        if statefile is not None:
+            session_tree.forget_session(statefile, row_id)
+    else:
+        if row_type == "w":
+            tmux.kill_window(row_id)
+        else:
+            tmux.kill_pane(row_id)
+        _rewrite_root_entries(tmpfile, cfg)
+        if statefile is not None and session_id:
+            state = session_tree.load_state(statefile)
+            state.expanded_sessions.add(session_id)
+            session_tree.save_state(statefile, state)
+    _refresh_tree_if_configured(tmpfile, viewfile, statefile)
     return 0
 
 
-def picker_action_ctrl_r(*, row_type: str, row_id: str, tmpfile: Path, cfg: Config) -> int:
+def picker_action_ctrl_r(
+    *,
+    row_type: str,
+    row_id: str,
+    tmpfile: Path,
+    cfg: Config,
+    session_id: str = "",
+    window_id: str = "",
+    viewfile: Path | None = None,
+    statefile: Path | None = None,
+) -> int:
     """Rename a worktree (branch+dir+repair) or a tmux session in place."""
+    del session_id, window_id
     target_path = _resolve_action_target(row_type, row_id)
     if target_path is None:
         return 0
 
     target = Path(target_path)
     if git.is_linked_worktree(target):
-        return _rename_worktree_action(target, target_path, tmpfile, cfg=cfg)
+        result = _rename_worktree_action(target, target_path, tmpfile, cfg=cfg)
+    elif row_type == "s":
+        result = _rename_session_action(row_id, tmpfile, cfg=cfg)
+    else:
+        tmux.flash_message("ctrl-r: not a linked worktree")
+        result = 0
+    _refresh_tree_if_configured(tmpfile, viewfile, statefile)
+    return result
 
-    if row_type == "s":
-        return _rename_session_action(row_id, tmpfile, cfg=cfg)
 
-    tmux.flash_message("ctrl-r: not a linked worktree")
-    return 0
+def _rewrite_root_entries(tmpfile: Path, cfg: Config) -> None:
+    rebuilt = list(build_session_entries_iter(cfg))
+    tmpfile.write_text("\n".join(rebuilt) + ("\n" if rebuilt else ""))
+
+
+def _refresh_tree_if_configured(
+    rootfile: Path,
+    viewfile: Path | None,
+    statefile: Path | None,
+) -> None:
+    if viewfile is not None and statefile is not None:
+        session_tree.refresh_view(rootfile, viewfile, statefile)
 
 
 def _resolve_action_target(row_type: str, row_id: str) -> str | None:

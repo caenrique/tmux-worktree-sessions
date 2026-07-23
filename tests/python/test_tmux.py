@@ -14,7 +14,10 @@ from pathlib import Path
 from tmux_worktree_sessions.tmux import (
     flash_message,
     kill_session,
+    list_session_windows,
     rename_session,
+    select_pane,
+    select_window,
     session_id,
     session_path,
     switch_client,
@@ -97,3 +100,33 @@ def test_flash_message_honours_custom_duration(tmux_stub: Callable[..., TmuxStub
     stub = tmux_stub()
     flash_message("hello", duration_ms=500)
     assert ["tmux", "display-message", "-d", "500", "hello"] in stub.invocations()
+
+
+def test_list_session_windows_parses_stable_window_and_pane_ids(
+    tmux_stub: Callable[..., TmuxStub],
+) -> None:
+    tmux_stub(
+        panes=(
+            "@2\t2\tserver\t0\t%3\t1\tcargo\t/repo\t1\tserver\n"
+            "@1\t1\teditor\t1\t%2\t2\tfish\t/repo\t0\ttests\n"
+            "@1\t1\teditor\t1\t%1\t1\tnvim\t/repo\t1\tcode"
+        )
+    )
+
+    windows = list_session_windows("$3")
+
+    assert [window.window_id for window in windows] == ["@1", "@2"]
+    assert [pane.pane_id for pane in windows[0].panes] == ["%1", "%2"]
+    assert windows[0].active
+
+
+def test_select_window_and_pane_use_stable_targets(
+    tmux_stub: Callable[..., TmuxStub],
+) -> None:
+    stub = tmux_stub()
+
+    select_window("@4")
+    select_pane("%9")
+
+    assert ["tmux", "select-window", "-t", "@4"] in stub.invocations()
+    assert ["tmux", "select-pane", "-t", "%9"] in stub.invocations()

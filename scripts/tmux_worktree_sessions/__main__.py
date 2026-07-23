@@ -36,7 +36,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from . import fetch_reload, git, picker, text, tmux
+from . import fetch_reload, git, picker, session_tree, text, tmux
 from .config import Config
 
 
@@ -108,8 +108,21 @@ def _add_internal_subcommands(sub: argparse._SubParsersAction[argparse.ArgumentP
     action_p.add_argument("key", choices=("ctrl-x", "ctrl-r"), help="action key")
     action_p.add_argument("type", help="picker entry type: 's', 'p', or 'n'")
     action_p.add_argument("id", help="session id (without leading $) or project path")
-    action_p.add_argument("tmpfile", help="picker entries tmpfile to mutate in place")
+    action_p.add_argument("tmpfile", help="top-level picker entries tmpfile to mutate in place")
+    action_p.add_argument("session", nargs="?", default="", help="containing session id for tree rows")
+    action_p.add_argument("window", nargs="?", default="", help="containing window id for pane rows")
+    action_p.add_argument("viewfile", nargs="?", help="rendered tree entries file")
+    action_p.add_argument("statefile", nargs="?", help="tree expansion state file")
     action_p.set_defaults(handler=cmd_internal_session_action)
+
+    tree_p = internal_sub.add_parser("tree-toggle")
+    tree_p.add_argument("type", help="selected tree row type")
+    tree_p.add_argument("id", help="selected stable row id")
+    tree_p.add_argument("session", help="containing session id")
+    tree_p.add_argument("rootfile", help="top-level picker entries file")
+    tree_p.add_argument("viewfile", help="rendered tree entries file")
+    tree_p.add_argument("statefile", help="tree expansion state file")
+    tree_p.set_defaults(handler=cmd_internal_tree_toggle)
 
     branch_p = internal_sub.add_parser("branch-action")
     branch_p.add_argument("key", choices=("ctrl-x",), help="action key")
@@ -140,16 +153,28 @@ def cmd_sessions_manage(args: argparse.Namespace) -> int:
     # only TWS_SCORES_FILE was set at parent entry.
     os.environ["SCORE_FILE"] = str(cfg.score_file)
 
-    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".entries") as initial:
-        tmpfile = Path(initial.name)
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".roots") as initial, tempfile.NamedTemporaryFile(
+        "w", delete=False, suffix=".entries"
+    ) as view, tempfile.NamedTemporaryFile("w", delete=False, suffix=".tree-state") as state:
+        rootfile = Path(initial.name)
+        viewfile = Path(view.name)
+        statefile = Path(state.name)
         for line in picker.build_session_entries_iter(cfg):
             initial.write(line + "\n")
+    session_tree.save_state(statefile, session_tree.TreeState())
+    session_tree.refresh_view(rootfile, viewfile, statefile)
 
     try:
-        return picker.run_session_picker(tmpfile, cfg=cfg)
+        return picker.run_session_picker(
+            viewfile,
+            cfg=cfg,
+            rootfile=rootfile,
+            statefile=statefile,
+        )
     finally:
-        with contextlib.suppress(FileNotFoundError):
-            tmpfile.unlink()
+        for path in (rootfile, viewfile, statefile):
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
 
 
 def cmd_sessions_display_name(args: argparse.Namespace) -> int:
@@ -206,8 +231,24 @@ def cmd_internal_session_action(args: argparse.Namespace) -> int:
         row_type=args.type,
         row_id=args.id,
         tmpfile=Path(args.tmpfile),
+        session_id=args.session,
+        window_id=args.window,
+        viewfile=Path(args.viewfile) if args.viewfile else None,
+        statefile=Path(args.statefile) if args.statefile else None,
         cfg=Config.from_env(),
     )
+
+
+def cmd_internal_tree_toggle(args: argparse.Namespace) -> int:
+    session_tree.toggle(
+        row_type=args.type,
+        row_id=args.id,
+        session_id=args.session,
+        rootfile=Path(args.rootfile),
+        viewfile=Path(args.viewfile),
+        statefile=Path(args.statefile),
+    )
+    return 0
 
 
 def cmd_internal_branch_action(args: argparse.Namespace) -> int:

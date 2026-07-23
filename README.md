@@ -98,11 +98,18 @@ The placeholder is expanded once when the plugin is loaded by TPM, so make sure 
 
 Open with the configured key (default `Ctrl+Shift+S`).
 
+Press `Tab` on a running session to expand its windows, then press
+`Tab` on a window to reveal its panes. Window and pane rows retain
+stable tmux IDs, so `Enter` activates the exact target and `Ctrl-X`
+closes the selected session, window, or pane. Topology is loaded only
+for expanded sessions, preserving the fzf picker's fast startup.
+
 | Key | Action |
 |---|---|
 | `Enter` | Switch to the selected session; create one if the entry is a project |
+| `Tab` | Expand or collapse the selected session or window |
 | `Ctrl-W` | Open the branch/worktree picker for the selected repo |
-| `Ctrl-X` | Kill the session; the entry stays visible as a project |
+| `Ctrl-X` | Close the selected session, window, or pane |
 | `Ctrl-R` | Rename: for linked worktrees, renames the git branch and moves the directory; for plain sessions, renames the tmux session |
 | `?` | Toggle the preview pane (shows session window contents or a directory listing) |
 | `Ctrl-Backspace` / `Esc` | Close the picker |

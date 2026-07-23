@@ -30,6 +30,25 @@ class Session:
     last_attached: int
 
 
+@dataclass(frozen=True)
+class Pane:
+    pane_id: str
+    index: int
+    command: str
+    path: Path
+    active: bool
+    title: str
+
+
+@dataclass(frozen=True)
+class Window:
+    window_id: str
+    index: int
+    name: str
+    active: bool
+    panes: tuple[Pane, ...]
+
+
 def session_id(name: str) -> str | None:
     """Return the tmux session id (``$N``) for an exactly-named session.
 
@@ -117,6 +136,63 @@ def session_path(target: str) -> str:
     return _display_message("#{session_path}", target=target)
 
 
+def list_session_windows(target: str) -> list[Window]:
+    """Return windows and panes for one session, ordered by tmux index."""
+    fmt = "\t".join(
+        (
+            "#{window_id}",
+            "#{window_index}",
+            "#{window_name}",
+            "#{window_active}",
+            "#{pane_id}",
+            "#{pane_index}",
+            "#{pane_current_command}",
+            "#{pane_current_path}",
+            "#{pane_active}",
+            "#{pane_title}",
+        )
+    )
+    result = subprocess.run(
+        ["tmux", "list-panes", "-s", "-t", target, "-F", fmt],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return []
+    grouped: dict[str, tuple[int, str, bool, list[Pane]]] = {}
+    for line in result.stdout.splitlines():
+        fields = line.split("\t")
+        if len(fields) < 10:
+            continue
+        try:
+            window_index = int(fields[1])
+            pane_index = int(fields[5])
+        except ValueError:
+            continue
+        pane = Pane(
+            pane_id=fields[4],
+            index=pane_index,
+            command=fields[6],
+            path=Path(fields[7]),
+            active=fields[8] == "1",
+            title=fields[9],
+        )
+        grouped.setdefault(
+            fields[0],
+            (window_index, fields[2], fields[3] == "1", []),
+        )[3].append(pane)
+    return [
+        Window(
+            window_id,
+            index,
+            name,
+            active,
+            tuple(sorted(panes, key=lambda pane: pane.index)),
+        )
+        for window_id, (index, name, active, panes) in sorted(grouped.items(), key=lambda item: item[1][0])
+    ]
+
+
 def _display_message(fmt: str, *, target: str | None = None) -> str:
     cmd = ["tmux", "display-message", "-p"]
     if target is not None:
@@ -131,6 +207,14 @@ def _display_message(fmt: str, *, target: str | None = None) -> str:
 def kill_session(target: str) -> None:
     """Kill the session ``target`` (id like ``"$3"``); errors are swallowed."""
     subprocess.run(["tmux", "kill-session", "-t", target], capture_output=True)
+
+
+def kill_window(target: str) -> None:
+    subprocess.run(["tmux", "kill-window", "-t", target], capture_output=True)
+
+
+def kill_pane(target: str) -> None:
+    subprocess.run(["tmux", "kill-pane", "-t", target], capture_output=True)
 
 
 def rename_session(target: str, new_name: str) -> None:
@@ -149,6 +233,14 @@ def switch_client(target: str) -> None:
     attach without conditional creation.
     """
     subprocess.run(["tmux", "switch-client", "-t", target], capture_output=True)
+
+
+def select_window(target: str) -> None:
+    subprocess.run(["tmux", "select-window", "-t", target], capture_output=True)
+
+
+def select_pane(target: str) -> None:
+    subprocess.run(["tmux", "select-pane", "-t", target], capture_output=True)
 
 
 def flash_message(message: str, *, duration_ms: int = 2000) -> None:

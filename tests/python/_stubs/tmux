@@ -6,6 +6,7 @@
 #   TMUX_STUB_CURRENT   — `display-message -p '#{session_name}'`
 #   TMUX_STUB_PREV      — `display-message -p '#{client_last_session}'`
 #   TMUX_STUB_PANE_PATH — `display-message -p '#{pane_current_path}'`
+#   TMUX_STUB_PANES     — newline-sep rows returned by `list-panes`
 #   TMUX_STUB_NEW_ID    — id printed by `new-session ... -P -F '#{session_id}'`
 #   TMUX_STUB_OPTIONS   — newline-sep `key=value` for `show-option -gqv key`
 
@@ -84,7 +85,11 @@ case "$cmd" in
     printf '%s' "$id"
     ;;
 
-  switch-client|kill-session|rename-session|bind-key|capture-pane|source)
+  list-panes)
+    printf '%s' "${TMUX_STUB_PANES:-}"
+    ;;
+
+  switch-client|select-window|select-pane|kill-session|kill-window|kill-pane|rename-session|bind-key|capture-pane|source)
     # Pure side-effect: log only (already logged at top).
     :
     ;;

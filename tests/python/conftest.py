@@ -232,12 +232,14 @@ def tmux_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., 
     def _factory(
         *,
         sessions: str = "",
+        panes: str = "",
         new_id: str = "$99",
     ) -> TmuxStub:
         log = tmp_path / "tmux_stub.log"
         monkeypatch.setenv("PATH", f"{_TMUX_STUB_DIR}:{os.environ['PATH']}")
         monkeypatch.setenv("TMUX_STUB_LOG", str(log))
         monkeypatch.setenv("TMUX_STUB_SESSIONS", sessions)
+        monkeypatch.setenv("TMUX_STUB_PANES", panes)
         monkeypatch.setenv("TMUX_STUB_NEW_ID", new_id)
         return TmuxStub(log=log)
 
