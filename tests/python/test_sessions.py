@@ -698,6 +698,30 @@ def test_cli_worktree_manage_existing_branch_creates_worktree_and_switches(
     assert any(call[:4] == ["tmux", "switch-client", "-t", "$88"] for call in invocations), invocations
 
 
+def test_cli_worktree_manage_pr_branch_keeps_normal_name_and_sibling_layout(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+    fzf_stub: object,
+    make_repo: Callable[..., Path],
+    touch_fetch_head: Callable[[Path], None],
+) -> None:
+    """A PR-marked row follows ordinary checkout and layout behavior."""
+    repo = make_repo("container/main", branches=("main", "feature"), with_remote=True)
+    touch_fetch_head(repo)
+    monkeypatch.setenv("TMUX_STUB_PANE_PATH", str(repo))
+    tmux_stub(sessions="", new_id="$89")
+    fzf_stub.respond("\nfeature\t! feature · Review me\tpr")  # type: ignore[attr-defined]
+
+    rc = main(["worktree", "manage"])
+
+    assert rc == 0
+    assert (tmp_path / "container" / "feature").is_dir()
+    assert not (tmp_path / "container" / "pr-review-feature").exists()
+    assert not (repo / ".worktrees" / "feature").exists()
+
+
 def test_cli_action_ctrl_r_worktree_renames_branch_and_rebuilds_tmpfile(
     monkeypatch: pytest.MonkeyPatch,
     cli_env: Path,

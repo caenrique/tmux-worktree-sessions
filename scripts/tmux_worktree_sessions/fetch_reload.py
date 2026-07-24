@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import shlex
 import threading
+import time
 from pathlib import Path
 
-from . import curl, git
+from . import curl, git, pull_requests
 from .icons import IconSet
 from .picker import gen_branch_picker_entries
 
@@ -51,6 +52,7 @@ def _spinner_loop(stop: threading.Event, *, port: int, header_base: str) -> None
 def fetch_and_reload(
     repo: Path,
     tmpfile: Path,
+    statefile: Path,
     port: int,
     header_base: str,
     *,
@@ -77,6 +79,7 @@ def fetch_and_reload(
     spinner.start()
     try:
         git.fetch_all(repo)
+        prs = pull_requests.list_open(repo, now=time.time()) if pull_requests.is_available() else {}
         with tmpfile.open("w") as f:
             for line in gen_branch_picker_entries(
                 repo,
@@ -84,6 +87,7 @@ def fetch_and_reload(
                 home=home,
                 strip_prefixes=strip_prefixes,
                 session_paths=session_paths,
+                open_pull_requests=prs,
             ):
                 f.write(line + "\n")
     finally:
@@ -91,8 +95,11 @@ def fetch_and_reload(
         spinner.join()
 
     quoted = shlex.quote(str(tmpfile))
+    quoted_state = shlex.quote(str(statefile))
+    reload_command = f"if grep -qx pr {quoted_state}; then awk -F '\\t' '$3 == \"pr\"' {quoted}; else cat {quoted}; fi"
+    final_header = f"{header_base} [pull requests only]" if statefile.read_text().strip() == "pr" else header_base
     curl.post(
         port,
-        f"change-header({header_base})+reload(cat {quoted})",
+        f"change-header({final_header})+reload({reload_command})",
         max_time=2.0,
     )

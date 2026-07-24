@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Programmable gh stub: log argv and emit GH_STUB_OUTPUT.
+
+{
+  printf 'gh'
+  for a in "$@"; do printf '\t%s' "$a"; done
+  printf '\n'
+} >> "${GH_STUB_LOG:-/dev/null}" 2>/dev/null || true
+
+printf '%s' "${GH_STUB_OUTPUT:-[]}"
+exit "${GH_STUB_EXIT_CODE:-0}"

@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+from tmux_worktree_sessions import pull_requests
 from tmux_worktree_sessions.__main__ import main
 from tmux_worktree_sessions.icons import IconSet
 from tmux_worktree_sessions.picker import (
@@ -19,8 +21,9 @@ from tmux_worktree_sessions.picker import (
     gen_branch_picker_entries,
     pick_branch,
 )
+from tmux_worktree_sessions.pull_requests import PullRequest
 
-from .conftest import FzfStub, TmuxStub
+from .conftest import FzfStub, GhStub, TmuxStub
 
 
 def test_iconset_sep_is_space_when_icons_present() -> None:
@@ -120,6 +123,30 @@ def test_gen_branch_picker_entries_plain_branch_has_no_label_styling(
 
     feature_line = next(line for line in lines if line.startswith("feature\t"))
     assert feature_line == "feature\tfeature"
+
+
+def test_gen_branch_picker_entries_renders_pull_request_metadata_in_gray(
+    make_repo: Callable[..., Path],
+) -> None:
+    repo = make_repo("r", branches=("main", "feature"), with_remote=True)
+    lines = list(
+        gen_branch_picker_entries(
+            repo,
+            icons=IconSet.from_style("ascii"),
+            open_pull_requests={
+                "feature": PullRequest(
+                    title="Improve the picker",
+                    author="octocat",
+                    days_open=4,
+                )
+            },
+        )
+    )
+
+    feature = next(line for line in lines if line.startswith("feature\t"))
+    assert feature.startswith("feature\t! feature ")
+    assert "\x1b[38;2;108;112;134mImprove the picker · @octocat · 4d\x1b[0m" in feature
+    assert feature.endswith("\tpr")
 
 
 def test_gen_branch_picker_entries_session_branch_is_green(
@@ -339,6 +366,54 @@ def test_pick_branch_binds_ctrl_x_for_delete_worktree(
     assert bind_tokens, flat
     assert "branch-action" in bind_tokens[0]
     assert "ctrl-x" in bind_tokens[0]
+
+
+def test_pick_branch_ctrl_p_filters_to_pull_request_rows(
+    make_repo: Callable[..., Path],
+    touch_fetch_head: Callable[[Path], None],
+    fzf_stub: FzfStub,
+    gh_stub: GhStub,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = make_repo("r", branches=("main", "feature"), with_remote=True)
+    touch_fetch_head(repo)
+    monkeypatch.setenv(
+        "GH_STUB_OUTPUT",
+        '[{"headRefName":"feature","title":"Review me","author":{"login":"octocat"},'
+        '"createdAt":"1970-01-01T00:00:00Z"}]',
+    )
+    fzf_stub.respond("ctrl-p\nfeature\t! feature\tpr")
+    fzf_stub.respond("\nfeature\t! feature\tpr")
+
+    result = pick_branch(repo, **_PICK_BRANCH_ARGS)  # type: ignore[arg-type]
+
+    assert result == BranchChoice(kind="existing", name="feature")
+    calls = fzf_stub.stdin_log.read_text().split("###CALL###\n")[1:]
+    assert len(calls) == 2
+    assert "feature\t" in calls[1]
+    assert "\tpr" in calls[1]
+    assert "[new]\t" not in calls[1]
+    assert "main\t" not in calls[1]
+
+
+def test_pick_branch_omits_ctrl_p_when_gh_is_unavailable(
+    make_repo: Callable[..., Path],
+    touch_fetch_head: Callable[[Path], None],
+    fzf_stub: FzfStub,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = make_repo("r", with_remote=True)
+    touch_fetch_head(repo)
+    monkeypatch.setattr(pull_requests, "is_available", lambda: False)
+    fzf_stub.esc()
+
+    pick_branch(repo, **_PICK_BRANCH_ARGS)  # type: ignore[arg-type]
+
+    flat = [token for invocation in fzf_stub.invocations() for token in invocation]
+    expect_value = flat[flat.index("--expect") + 1]
+    header_value = flat[flat.index("--header") + 1]
+    assert "ctrl-p" not in expect_value
+    assert "ctrl-p" not in header_value
 
 
 # ── branch_action_ctrl_x ─────────────────────────────────────────────────────

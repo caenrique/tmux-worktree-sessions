@@ -291,6 +291,30 @@ class CurlStub:
         return self.log.read_text()
 
 
+@dataclass
+class GhStub:
+    """Handle to the env-driven gh stub."""
+
+    log: Path
+
+    def invocations(self) -> list[list[str]]:
+        if not self.log.exists():
+            return []
+        return [line.split("\t") for line in self.log.read_text().splitlines() if line]
+
+
+@pytest.fixture
+def gh_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> GhStub:
+    """Prepend the gh stub to PATH and seed its output/log state."""
+    log = tmp_path / "gh.log"
+    log.write_text("")
+    monkeypatch.setenv("PATH", f"{_TMUX_STUB_DIR}:{os.environ['PATH']}")
+    monkeypatch.setenv("GH_STUB_LOG", str(log))
+    monkeypatch.setenv("GH_STUB_OUTPUT", "[]")
+    monkeypatch.setenv("GH_STUB_EXIT_CODE", "0")
+    return GhStub(log=log)
+
+
 @pytest.fixture
 def curl_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CurlStub:
     """Prepend the curl stub to PATH and seed an empty log."""

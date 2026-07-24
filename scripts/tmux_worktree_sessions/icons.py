@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class IconSet:
-    """Five icons used across picker lists, plus a derived separator.
+    """Icons used across picker lists, plus a derived separator.
 
     ``sep`` is a single space when icons are non-empty and empty in
     ``none`` style, so ``f"{icon}{sep}{label}"`` doesn't leave a stray
@@ -24,6 +24,7 @@ class IconSet:
     project: str
     branch: str
     remote: str
+    pull_request: str
     new: str
 
     @property
@@ -33,15 +34,16 @@ class IconSet:
     @classmethod
     def from_style(cls, style: str) -> IconSet:
         if style == "none":
-            return cls(session="", project="", branch="", remote="", new="")
+            return cls(session="", project="", branch="", remote="", pull_request="", new="")
         if style == "ascii":
-            return cls(session="*", project=".", branch="-", remote="@", new="+")
+            return cls(session="*", project=".", branch="-", remote="@", pull_request="!", new="+")
         if style == "emoji":
             return cls(
                 session="🖥",
                 project="📦",
                 branch="🌱",
                 remote="☁️",
+                pull_request="🔀",
                 new="✨",
             )
         # default: nerd. Written as \\uXXXX escapes — the literal glyphs
@@ -52,5 +54,6 @@ class IconSet:
             project="",
             branch="",
             remote="",
+            pull_request="",
             new="",
         )

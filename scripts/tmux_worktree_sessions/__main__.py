@@ -121,6 +121,7 @@ def _add_internal_subcommands(sub: argparse._SubParsersAction[argparse.ArgumentP
     fetch_p = internal_sub.add_parser("fetch-reload")
     fetch_p.add_argument("repo", help="path to the git repo")
     fetch_p.add_argument("tmpfile", help="branch entries file fzf reads via reload(cat ...)")
+    fetch_p.add_argument("statefile", help="current branch-picker view: all or pull requests")
     fetch_p.add_argument("port", type=int, help="fzf --listen port to POST to")
     fetch_p.add_argument("header_base", help="header text without the spinner suffix")
     fetch_p.set_defaults(handler=cmd_internal_fetch_reload)
@@ -241,6 +242,7 @@ def cmd_internal_fetch_reload(args: argparse.Namespace) -> int:
         fetch_reload.fetch_and_reload(
             repo,
             tmpfile,
+            Path(args.statefile),
             args.port,
             args.header_base,
             icons=cfg.icons,
