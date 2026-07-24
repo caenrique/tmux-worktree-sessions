@@ -7,6 +7,7 @@ _get() { tmux show-option -gqv "$1"; }
 
 _key=$(_get @tws-key);                    _key=${_key:-C-S-s}
 _worktree_key=$(_get @tws-worktree-key); _worktree_key=${_worktree_key:-C-S-w}
+_previous_key=$(_get @tws-previous-key); _previous_key=${_previous_key:-C-S-r}
 _projects_dirs=$(_get @tws-projects-dir); _projects_dirs=${_projects_dirs:-$HOME/Projects}
 _scores_file=$(_get @tws-scores-file);    _scores_file=${_scores_file:-$HOME/.local/share/tws/scores.tsv}
 _strip_prefixes=$(_get @tws-strip-prefixes)
@@ -44,6 +45,14 @@ _env="\
 
 tmux bind-key -n "$_key" run-shell -b "$_env python3 -m tmux_worktree_sessions sessions manage"
 tmux bind-key -n "$_worktree_key" run-shell -b "$_env python3 -m tmux_worktree_sessions worktree manage"
+tmux bind-key -n "$_previous_key" run-shell -b "$_env python3 -m tmux_worktree_sessions sessions previous"
+
+# Keep a real, session-scoped display-name option available to native tmux
+# formats and external status renderers. Attach and rename hooks run
+# synchronously for only their target session, before tmux redraws.
+_sync_current_name="$_env python3 -m tmux_worktree_sessions _internal sync-session-name '#{session_id}'"
+tmux set-hook -g 'after-rename-session[100]' "run-shell \"$_sync_current_name\""
+tmux set-hook -g 'client-session-changed[100]' "run-shell \"$_sync_current_name\""
 
 # Status-bar widget: replace `#{session_display_name}` in status-left
 # and status-right with a `#(...)` shell-command that calls

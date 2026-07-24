@@ -5,6 +5,7 @@ The CLI surface is split into two clearly separated tiers:
 User-facing — bound from the tmux config or invoked from the status bar:
 
 * ``sessions manage`` — TPM key-bind entry point.
+* ``sessions previous`` — switch to the previous live session by attach time.
 * ``sessions display-name`` — status-bar helper (see README).
 * ``worktree manage`` — standalone branch picker for the current pane.
 
@@ -36,7 +37,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from . import fetch_reload, git, picker, session_tree, text, tmux
+from . import fetch_reload, git, picker, session_tree, sessions, text, tmux
 from .config import Config
 
 
@@ -68,6 +69,12 @@ def _add_user_subcommands(sub: argparse._SubParsersAction[argparse.ArgumentParse
         help="run the session-picker fzf loop (top-level entry point)",
     )
     manage_p.set_defaults(handler=cmd_sessions_manage)
+
+    previous_p = sessions_sub.add_parser(
+        "previous",
+        help="switch to the most recently attached other live session",
+    )
+    previous_p.set_defaults(handler=cmd_sessions_previous)
 
     display_name_p = sessions_sub.add_parser(
         "display-name",
@@ -115,14 +122,23 @@ def _add_internal_subcommands(sub: argparse._SubParsersAction[argparse.ArgumentP
     action_p.add_argument("statefile", nargs="?", help="tree expansion state file")
     action_p.set_defaults(handler=cmd_internal_session_action)
 
-    tree_p = internal_sub.add_parser("tree-toggle")
+    tree_p = internal_sub.add_parser("tree-expand")
+    tree_p.add_argument("action", choices=("expand", "collapse"))
     tree_p.add_argument("type", help="selected tree row type")
     tree_p.add_argument("id", help="selected stable row id")
     tree_p.add_argument("session", help="containing session id")
     tree_p.add_argument("rootfile", help="top-level picker entries file")
     tree_p.add_argument("viewfile", help="rendered tree entries file")
     tree_p.add_argument("statefile", help="tree expansion state file")
-    tree_p.set_defaults(handler=cmd_internal_tree_toggle)
+    tree_p.set_defaults(handler=cmd_internal_tree_expand)
+
+    preview_p = internal_sub.add_parser("preview")
+    preview_p.add_argument("target", help="stable tmux session, window, or pane target")
+    preview_p.set_defaults(handler=cmd_internal_preview)
+
+    sync_name_p = internal_sub.add_parser("sync-session-name")
+    sync_name_p.add_argument("target", help="session id to refresh")
+    sync_name_p.set_defaults(handler=cmd_internal_sync_session_name)
 
     branch_p = internal_sub.add_parser("branch-action")
     branch_p.add_argument("key", choices=("ctrl-x",), help="action key")
@@ -172,9 +188,15 @@ def cmd_sessions_manage(args: argparse.Namespace) -> int:
             statefile=statefile,
         )
     finally:
-        for path in (rootfile, viewfile, statefile):
+        for path in (rootfile, viewfile, statefile, statefile.with_name(f"{statefile.name}.agents")):
             with contextlib.suppress(FileNotFoundError):
                 path.unlink()
+
+
+def cmd_sessions_previous(args: argparse.Namespace) -> int:
+    """Switch to the most recently attached other live tmux session."""
+    tmux.switch_to_previous_attached_session()
+    return 0
 
 
 def cmd_sessions_display_name(args: argparse.Namespace) -> int:
@@ -239,8 +261,9 @@ def cmd_internal_session_action(args: argparse.Namespace) -> int:
     )
 
 
-def cmd_internal_tree_toggle(args: argparse.Namespace) -> int:
-    session_tree.toggle(
+def cmd_internal_tree_expand(args: argparse.Namespace) -> int:
+    session_tree.set_expanded(
+        action=args.action,
         row_type=args.type,
         row_id=args.id,
         session_id=args.session,
@@ -248,6 +271,30 @@ def cmd_internal_tree_toggle(args: argparse.Namespace) -> int:
         viewfile=Path(args.viewfile),
         statefile=Path(args.statefile),
     )
+    return 0
+
+
+def cmd_internal_preview(args: argparse.Namespace) -> int:
+    sys.stdout.buffer.write(tmux.capture_pane(args.target))
+    return 0
+
+
+def cmd_internal_sync_session_name(args: argparse.Namespace) -> int:
+    """Refresh ``@tws-session-name`` for one newly attached session."""
+    target = args.target if args.target.startswith("$") else f"${args.target}"
+    cfg = Config.from_env()
+    name = tmux.session_name(target)
+    path = tmux.session_path(target)
+    if not name or not path:
+        return 0
+    display_name = sessions.format_session_display(
+        Path(path),
+        name,
+        home=cfg.home,
+        strip_prefixes=cfg.strip_prefixes,
+    )
+    tmux.set_session_option(target, "@tws-session-name", display_name)
+    tmux.refresh_status()
     return 0
 
 

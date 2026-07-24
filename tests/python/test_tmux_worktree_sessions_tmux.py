@@ -148,6 +148,42 @@ def test_honours_custom_worktree_key(tmux_stub: Callable[..., TmuxStub]) -> None
     assert "python3 -m tmux_worktree_sessions worktree manage" in row
 
 
+def test_binds_previous_session_key(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    _run_tpm_entry(stub, options="")
+    row = _bind_key_row(stub, key="C-S-r")
+    assert "python3 -m tmux_worktree_sessions sessions previous" in row
+
+
+def test_honours_custom_previous_session_key(tmux_stub: Callable[..., TmuxStub]) -> None:
+    stub = tmux_stub()
+    _run_tpm_entry(stub, options="@tws-previous-key=M-r")
+    row = _bind_key_row(stub, key="M-r")
+    assert "python3 -m tmux_worktree_sessions sessions previous" in row
+
+
+def test_syncs_session_names_and_installs_maintenance_hooks(
+    tmux_stub: Callable[..., TmuxStub],
+) -> None:
+    stub = tmux_stub()
+    _run_tpm_entry(stub, options="")
+    rows = stub.invocations()
+    sync_command = "python3 -m tmux_worktree_sessions _internal sync-session-name"
+
+    for hook in (
+        "after-rename-session[100]",
+        "client-session-changed[100]",
+    ):
+        assert any(
+            call[1:4] == ["set-hook", "-g", hook]
+            and "run-shell -b" not in call[-1]
+            and sync_command in call[-1]
+            and "'#{session_id}'" in call[-1]
+            for call in rows
+        )
+    assert not any(call[1:4] == ["set-hook", "-g", "after-new-session[100]"] for call in rows)
+
+
 def test_worktree_bind_carries_same_env_block(tmux_stub: Callable[..., TmuxStub]) -> None:
     """Both bind-keys should share the env block, so configuration set for
     the session picker also reaches the standalone worktree picker."""
@@ -235,6 +271,7 @@ def _clean_stub_log_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in (
         "TMUX_STUB_SESSIONS",
         "TMUX_STUB_CURRENT",
+        "TMUX_STUB_CURRENT_ID",
         "TMUX_STUB_PREV",
         "TMUX_STUB_PANE_PATH",
         "TMUX_STUB_NEW_ID",

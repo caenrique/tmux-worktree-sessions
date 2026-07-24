@@ -151,7 +151,7 @@ def apply_ctrl_r_session_rename(
     return result
 
 
-def _format_session_display(
+def format_session_display(
     sess_path: Path,
     name: str,
     *,
@@ -208,12 +208,12 @@ def build_entries(
     # when their tmux record is missing.
     if current and current in by_name:
         s = by_name[current]
-        display = _format_session_display(s.path, s.name, home=home, strip_prefixes=strip_prefixes)
+        display = format_session_display(s.path, s.name, home=home, strip_prefixes=strip_prefixes)
         yield (f"s\t{s.sid}\t{display}\t{YELLOW}{icons.session}{icons.sep}{display} (current){RESET}")
 
     if previous and previous != current and previous in by_name:
         s = by_name[previous]
-        display = _format_session_display(s.path, s.name, home=home, strip_prefixes=strip_prefixes)
+        display = format_session_display(s.path, s.name, home=home, strip_prefixes=strip_prefixes)
         yield (f"s\t{s.sid}\t{display}\t{GREEN}{icons.session}{icons.sep}{display} (previous){RESET}")
 
     # Remaining sessions ordered by last_attached desc; never-attached
@@ -221,7 +221,7 @@ def build_entries(
     remaining = [s for s in sessions if s.name != current and s.name != previous]
     remaining.sort(key=lambda s: s.last_attached, reverse=True)
     for s in remaining:
-        display = _format_session_display(s.path, s.name, home=home, strip_prefixes=strip_prefixes)
+        display = format_session_display(s.path, s.name, home=home, strip_prefixes=strip_prefixes)
         yield f"s\t{s.sid}\t{display}\t{GREEN}{icons.session}{icons.sep}{display}{RESET}"
 
     # Projects not yet open as sessions, sorted by recency score.

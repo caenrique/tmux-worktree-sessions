@@ -262,18 +262,24 @@ class Worktree:
 
     ``branch`` is the bare branch name (no ``refs/heads/`` prefix).
     Detached worktrees use the literal string ``"(detached)"`` so
-    callers can render the column without a special case.
+    callers can render the column without a special case. ``prunable``
+    is ``True`` when git reports the worktree as prunable (its gitdir
+    points at a non-existent or moved location) — such stray entries
+    should not be trusted to reflect the repo's layout.
     """
 
     path: Path
     branch: str
+    prunable: bool = False
 
 
 def list_worktrees(repo: Path) -> list[Worktree]:
     """Parse ``git worktree list --porcelain`` into ``Worktree`` rows.
 
     Detached worktrees are reported with ``branch == "(detached)"`` so
-    callers can render the column without a special case.
+    callers can render the column without a special case. Worktrees git
+    flags as ``prunable`` are kept in the list but marked via the
+    ``prunable`` field so callers can choose to skip them.
     """
     result = _git(repo, "worktree", "list", "--porcelain")
     if result.returncode != 0:
@@ -282,25 +288,30 @@ def list_worktrees(repo: Path) -> list[Worktree]:
     worktrees: list[Worktree] = []
     path: str | None = None
     branch = ""
+    prunable = False
 
     def _flush() -> None:
-        nonlocal path, branch
+        nonlocal path, branch, prunable
         if path is not None:
-            worktrees.append(Worktree(Path(path), branch or "(detached)"))
+            worktrees.append(Worktree(Path(path), branch or "(detached)", prunable))
             path = None
             branch = ""
+            prunable = False
 
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
             _flush()
             path = line[len("worktree ") :]
             branch = ""
+            prunable = False
         elif line.startswith("branch "):
             ref = line[len("branch ") :]
             heads_prefix = "refs/heads/"
             branch = ref[len(heads_prefix) :] if ref.startswith(heads_prefix) else ref
         elif line == "detached":
             branch = "(detached)"
+        elif line == "prunable" or line.startswith("prunable "):
+            prunable = True
         elif line == "":
             _flush()
     _flush()
@@ -404,7 +415,13 @@ def detect_layout(repo: Path, *, worktrees_dir: str) -> WorktreeLayout:
     and ``"ambiguous"`` when the existing worktrees don't all match a
     single shape.
 
-    With no linked worktrees yet the path shape of the main checkout
+    Prunable worktrees (git's term for entries whose gitdir points at a
+    non-existent or moved location — typically a checkout deleted out
+    from under git) are ignored: they often sit at stale paths that no
+    longer reflect the repo's real layout and would otherwise skew the
+    unanimous-shape check toward ``"ambiguous"``.
+
+    With no usable linked worktrees the path shape of the main checkout
     alone is consulted: a checkout whose basename equals its current
     branch (e.g. ``Projects/webapp/main`` on branch ``main``) is the
     canonical sibling-layout convention — the parent is the project
@@ -415,16 +432,15 @@ def detect_layout(repo: Path, *, worktrees_dir: str) -> WorktreeLayout:
     caller resolves it via the configured default.
     """
     worktrees = list_worktrees(repo)
-    if len(worktrees) < 2:
-        if not worktrees:
-            return "ambiguous"
-        main = worktrees[0].path
+    if not worktrees:
+        return "ambiguous"
+    main = worktrees[0].path
+    linked = [wt.path for wt in worktrees[1:] if not wt.prunable]
+    if not linked:
         branch = current_branch(main)
         if branch is not None and main.name == branch:
             return "sibling"
         return "ambiguous"
-    main = worktrees[0].path
-    linked = [wt.path for wt in worktrees[1:]]
 
     sibling_parent = main.parent
     if all(wt.parent == sibling_parent for wt in linked):

@@ -546,6 +546,33 @@ def test_cli_display_name(
     assert stdout.getvalue() == expected
 
 
+def test_cli_sync_session_name_only_populates_target_session(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_env: Path,
+    tmp_path: Path,
+    tmux_stub: Callable[..., object],
+) -> None:
+    monkeypatch.setenv("TWS_STRIP_PREFIXES", str(tmp_path))
+    stub = tmux_stub(sessions=(f"with_dot\t$1\t{tmp_path}/with.dot\t20\nmanual_name\t$2\t{tmp_path}/other.path\t10"))
+
+    rc = main(["_internal", "sync-session-name", "$1"])
+
+    assert rc == 0
+    invocations = stub.invocations()  # type: ignore[attr-defined]
+    assert [
+        "tmux",
+        "set-option",
+        "-q",
+        "-t",
+        "$1",
+        "@tws-session-name",
+        "with.dot",
+    ] in invocations
+    assert ["tmux", "refresh-client", "-S"] in invocations
+    assert not any(call[1:2] == ["ls"] for call in invocations)
+    assert not any(call[1:2] == ["set-option"] and "$2" in call for call in invocations)
+
+
 def test_cli_worktree_manage_outside_repo_displays_message(
     monkeypatch: pytest.MonkeyPatch,
     cli_env: Path,
@@ -619,12 +646,17 @@ def test_cli_manage_invokes_fzf_with_popup_args(
     # Every tree row carries an exact preview target in hidden column 7:
     # $session, @window, or %pane. The one preview command works for all.
     preview_idx = flat.index("--preview")
-    assert "s|w|t)" in flat[preview_idx + 1]
-    assert "-t {7}" in flat[preview_idx + 1]
-    bind_tokens = [token for token in flat if token.startswith("tab:")]
-    assert bind_tokens
-    assert "tree-toggle" in bind_tokens[0]
-    assert "reload(cat " in bind_tokens[0]
+    assert "s|w|t|a)" in flat[preview_idx + 1]
+    assert "PYTHONPATH=" in flat[preview_idx + 1]
+    assert "_internal preview {7}" in flat[preview_idx + 1]
+    right_binds = [token for token in flat if token.startswith("right:execute")]
+    left_binds = [token for token in flat if token.startswith("left:execute")]
+    assert right_binds and left_binds
+    assert "tree-expand expand" in right_binds[0]
+    assert "tree-expand collapse" in left_binds[0]
+    assert "reload(cat " in right_binds[0]
+    preview_window_idx = flat.index("--preview-window")
+    assert flat[preview_window_idx + 1].startswith("right:50%")
     assert "--no-sort" in flat
 
 

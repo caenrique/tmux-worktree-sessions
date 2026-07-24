@@ -24,13 +24,14 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import fzf, git, pull_requests, score, session_tree, sessions, text, tmux
+from . import curl, fzf, git, pull_requests, score, session_tree, sessions, text, tmux
 from .icons import IconSet
 
 if TYPE_CHECKING:
@@ -54,7 +55,9 @@ RESET = "\033[0m"
 _BRANCH_HEADER = "enter:checkout  ctrl-bs:back  ctrl-f:refresh  ctrl-x:delete-worktree"
 _PR_FILTER_HINT = "  ctrl-p:pull-requests"
 _NEW_NAME_HEADER = "enter:create  ctrl-bs:back"
-_SESSION_HEADER = "enter:open tab:expand ctrl-bs:back ?:preview ctrl-x:delete ctrl-r:rename ctrl-w:worktree"
+_SESSION_HEADER = (
+    "enter:open right:expand left:collapse ctrl-bs:back ?:preview ctrl-x:delete ctrl-r:rename ctrl-w:worktree"
+)
 _RENAME_HEADER = "enter:rename  ctrl-bs:cancel"
 _NEW_SESSION_HEADER = "enter:create  ctrl-bs:cancel"
 
@@ -62,6 +65,8 @@ _NEW_SESSION_HEADER = "enter:create  ctrl-bs:cancel"
 # 0–51199 well-known range and stays under the ephemeral ceiling.
 _LISTEN_PORT_BASE = 51200
 _LISTEN_PORT_RANGE = 14336
+_AGENT_SPINNER_INTERVAL_S = 0.12
+_AGENT_RELOAD_INITIAL_DELAY_S = 0.1
 
 
 __all__ = [
@@ -659,22 +664,74 @@ def run_session_picker(
     (open, switch, ctrl-w to open a worktree, etc.). Returns the exit
     code the CLI handler should propagate.
     """
+    listen_port = _LISTEN_PORT_BASE + secrets.randbelow(_LISTEN_PORT_RANGE)
+    resolved_rootfile = rootfile or tmpfile
     picker_obj = _build_session_picker(
         tmpfile,
-        rootfile=rootfile or tmpfile,
+        rootfile=resolved_rootfile,
         statefile=statefile,
+        listen_port=listen_port,
     )
+    stop_agent_refresh = threading.Event()
+    agent_thread: threading.Thread | None = None
+    if statefile is not None:
+        agent_thread = threading.Thread(
+            target=_refresh_agents_async,
+            kwargs={
+                "rootfile": resolved_rootfile,
+                "viewfile": tmpfile,
+                "statefile": statefile,
+                "listen_port": listen_port,
+                "stop": stop_agent_refresh,
+            },
+            daemon=True,
+        )
+        agent_thread.start()
 
-    while True:
-        with tmpfile.open("rb") as input_f:
-            selection = picker_obj.run(stdin=input_f)
+    try:
+        while True:
+            with tmpfile.open("rb") as input_f:
+                selection = picker_obj.run(stdin=input_f)
 
-        if selection.cancelled or selection.key == "ctrl-bs":
-            return 0
+            if selection.cancelled or selection.key == "ctrl-bs":
+                return 0
 
-        if _dispatch_session_selection(selection, cfg=cfg):
-            return 0
-        # Selection didn't terminate the loop — re-prompt.
+            if _dispatch_session_selection(selection, cfg=cfg):
+                return 0
+            # Selection didn't terminate the loop — re-prompt.
+    finally:
+        stop_agent_refresh.set()
+        if agent_thread is not None:
+            agent_thread.join()
+
+
+def _refresh_agents_async(
+    *,
+    rootfile: Path,
+    viewfile: Path,
+    statefile: Path,
+    listen_port: int,
+    stop: threading.Event,
+) -> None:
+    """Discover agents after first paint, then reload and animate the fzf view."""
+    agents = tmux.list_agents()
+    if stop.is_set():
+        return
+    session_tree.save_agents(statefile, agents)
+    session_tree.refresh_view(rootfile, viewfile, statefile)
+    if stop.wait(_AGENT_RELOAD_INITIAL_DELAY_S):
+        return
+    reload_action = f"reload(cat {shlex.quote(str(viewfile))})"
+    curl.post(listen_port, reload_action, max_time=2.0)
+    if not any(agent.status == "working" for agent in agents):
+        return
+
+    frame_index = 1
+    while not stop.wait(_AGENT_SPINNER_INTERVAL_S):
+        frame = session_tree.WORKING_SPINNER_FRAMES[frame_index]
+        session_tree.set_working_spinner_frame(viewfile, frame)
+        curl.post(listen_port, reload_action, max_time=0.5)
+        frame_index = (frame_index + 1) % len(session_tree.WORKING_SPINNER_FRAMES)
 
 
 def _build_session_picker(
@@ -682,6 +739,7 @@ def _build_session_picker(
     *,
     rootfile: Path | None = None,
     statefile: Path | None = None,
+    listen_port: int | None = None,
 ) -> fzf.Picker:
     """Construct the session picker with all action key binds wired up."""
     rootfile = rootfile or tmpfile
@@ -690,7 +748,13 @@ def _build_session_picker(
         viewfile=tmpfile if statefile is not None else None,
         statefile=statefile,
     )
-    preview_cmd = "case {1} in p) ls {2} 2>/dev/null ;; s|w|t) tmux capture-pane -e -p -t {7} 2>/dev/null ;; esac"
+    package_root = Path(__file__).resolve().parent.parent
+    preview_cmd = (
+        f"case {{1}} in p) ls {{2}} 2>/dev/null ;; "
+        f"s|w|t|a) env {shlex.quote(f'PYTHONPATH={package_root}')} "
+        f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions "
+        f"_internal preview {{7}} ;; esac"
+    )
     # No ``--nth`` is set on the picker: fzf indexes ``--nth`` into the
     # post-``--with-nth`` view, so any value finds nothing once
     # ``--with-nth 4`` collapses each row to a single field. We rely on
@@ -701,27 +765,34 @@ def _build_session_picker(
             header=_SESSION_HEADER,
             with_nth="4",
             expect="ctrl-w,ctrl-bs",
+            listen_port=listen_port,
             preview=preview_cmd,
-            preview_window="down:50%:border-top:nofollow:hidden",
+            preview_window="right:50%:border-left:nofollow:hidden",
             extra_flags=("--no-sort", "--tiebreak=index"),
+            force_color=True,
         )
         .bind("?:toggle-preview")
         .bind(bind_x)
         .bind(bind_r)
     )
     if statefile is not None:
-        picker_obj.bind(_build_tree_toggle_bind(rootfile, tmpfile, statefile))
+        for expression in _build_tree_expansion_binds(rootfile, tmpfile, statefile):
+            picker_obj.bind(expression)
     return picker_obj
 
 
-def _build_tree_toggle_bind(rootfile: Path, viewfile: Path, statefile: Path) -> str:
-    prefix = f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions _internal tree-toggle "
-    command = (
-        f"{prefix}{{1}} {{2}} {{5}} "
-        f"{shlex.quote(str(rootfile))} {shlex.quote(str(viewfile))} "
-        f"{shlex.quote(str(statefile))}"
-    )
-    return f"tab:execute-silent({command})+reload(cat {shlex.quote(str(viewfile))})+pos({{n}})"
+def _build_tree_expansion_binds(rootfile: Path, viewfile: Path, statefile: Path) -> tuple[str, str]:
+    prefix = f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions _internal tree-expand "
+
+    def _bind(key: str, action: str) -> str:
+        command = (
+            f"{prefix}{action} {{1}} {{2}} {{5}} "
+            f"{shlex.quote(str(rootfile))} {shlex.quote(str(viewfile))} "
+            f"{shlex.quote(str(statefile))}"
+        )
+        return f"{key}:execute-silent({command})+reload(cat {shlex.quote(str(viewfile))})+pos({{n}})"
+
+    return _bind("right", "expand"), _bind("left", "collapse")
 
 
 def _build_session_action_binds(
@@ -796,7 +867,7 @@ def _dispatch_session_selection(selection: fzf.PickerSelection, *, cfg: Config) 
         tmux.select_window(key2)
         tmux.switch_client(f"${session_id}")
         return True
-    if row_type == "t" and session_id:
+    if row_type in ("t", "a") and session_id:
         if window_id:
             tmux.select_window(window_id)
         tmux.select_pane(key2)
@@ -836,7 +907,7 @@ def _resolve_ctrl_w_repo(
     if row_type == "s":
         sess_path = tmux.session_path(f"${key2}")
         return git.toplevel(Path(sess_path)) if sess_path else None
-    if row_type in ("w", "t") and session_id:
+    if row_type in ("w", "t", "a") and session_id:
         sess_path = tmux.session_path(f"${session_id}")
         return git.toplevel(Path(sess_path)) if sess_path else None
     return None
@@ -897,7 +968,7 @@ def picker_action_ctrl_x(
 ) -> int:
     """Close a selected session/window/pane and refresh the tree."""
     del window_id
-    if row_type not in ("s", "w", "t"):
+    if row_type not in ("s", "w", "t", "a"):
         return 0
     if row_type == "s":
         tmux_id = f"${row_id}"

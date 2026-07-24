@@ -53,6 +53,7 @@ All options are set in `tmux.conf` with `set -g @option value`. Every option has
 |---|---|
 | `@tws-key` | `C-S-s` — Key binding to open the session picker |
 | `@tws-worktree-key` | `C-S-w` — Key binding to open the worktree/branch picker for the current pane's repo |
+| `@tws-previous-key` | `C-S-r` — Switch to the most recently attached other live session, even if tmux's remembered last session was deleted |
 | `@tws-projects-dir` | `$HOME/Projects` — Space-separated list of root directories to scan for git repos |
 | `@tws-strip-prefixes` | *(none)* — Space-separated path prefixes to strip from display names |
 | `@tws-manual-sessions` | *(none)* — Always-visible entries as space-separated `name:path` pairs |
@@ -92,26 +93,50 @@ set -g status-left '#{session_display_name} | %H:%M'
 
 The placeholder is expanded once when the plugin is loaded by TPM, so make sure your `status-left` / `status-right` are set **before** the `run '~/.tmux/plugins/tpm/tpm'` line in your `tmux.conf`.
 
+The same display value is available as the real, session-scoped tmux user
+option `@tws-session-name`. This is the preferred integration for status
+renderers that accept tmux formats:
+
+```toml
+[segments.session]
+tmux_format = '#{@tws-session-name}'
+```
+
+The plugin refreshes the targeted option synchronously whenever a session is
+attached or renamed. It never scans every session to maintain this value.
+
 ## 📖 Usage
 
 ### Session picker
 
 Open with the configured key (default `Ctrl+Shift+S`).
 
-Press `Tab` on a running session to expand its windows, then press
-`Tab` on a window to reveal its panes. Window and pane rows retain
+Press `Right` on a running session to expand its windows, then press
+`Right` on a window to reveal its panes; press `Left` to collapse either
+row. Window and pane rows retain
 stable tmux IDs, so `Enter` activates the exact target and `Ctrl-X`
 closes the selected session, window, or pane. Topology is loaded only
 for expanded sessions, preserving the fzf picker's fast startup.
 
+Running AI agent CLIs are discovered from each pane's command, title,
+launch command, and descendant processes. Sessions show individual
+agent badges at the end of their row, each containing the agent name and
+a colored state marker (animated Braille spinner when working, `◌` waiting,
+`◐` response, `○` idle).
+Expanding the session adds one directly selectable row per agent.
+Agent discovery runs after the initial picker render and reloads the rows
+asynchronously, so process inspection does not delay opening the picker.
+Codex, Claude, Gemini, OpenCode, Aider, Copilot, Goose, Amp, and Cursor
+are recognized.
+
 | Key | Action |
 |---|---|
 | `Enter` | Switch to the selected session; create one if the entry is a project |
-| `Tab` | Expand or collapse the selected session or window |
+| `Right` / `Left` | Expand / collapse the selected session or window |
 | `Ctrl-W` | Open the branch/worktree picker for the selected repo |
 | `Ctrl-X` | Close the selected session, window, or pane |
 | `Ctrl-R` | Rename: for linked worktrees, renames the git branch and moves the directory; for plain sessions, renames the tmux session |
-| `?` | Toggle the preview pane (shows session window contents or a directory listing) |
+| `?` | Toggle the right-side preview (shows the exact selected pane or a directory listing) |
 | `Ctrl-Backspace` / `Esc` | Close the picker |
 
 To remove a worktree, open the branch picker and press `Ctrl-X` on its row.
@@ -165,11 +190,11 @@ Configure the sub-folder name with `@tws-worktrees-dir` (default `.worktrees`).
 
 ### Detection
 
-For each repo the plugin looks at the existing linked worktrees:
+For each repo the plugin looks at the existing linked worktrees (skipping any git reports as *prunable* — stale entries whose checkout was deleted or moved, since they often sit at paths that no longer reflect the layout):
 
 - All siblings of the main checkout → **sibling layout**.
 - All under `<main>/<worktrees-dir>/` → **subfolder layout**.
-- No linked worktrees yet, but the main checkout's basename matches its current branch (e.g. `repo/main/` on branch `main`) → **sibling layout** (the canonical sibling shape — future worktrees land at `repo/<branch>/`).
+- No live linked worktrees yet, but the main checkout's basename matches its current branch (e.g. `repo/main/` on branch `main`) → **sibling layout** (the canonical sibling shape — future worktrees land at `repo/<branch>/`).
 - A mix, or none of the above → fall back to `@tws-default-worktree-layout` (default `subfolder`, so a freshly cloned repo never creates worktrees outside its own directory).
 
 `Ctrl-W` creates a new worktree in the right place; `Ctrl-R` renames within the same layout.
@@ -190,6 +215,7 @@ ad-hoc debugging — equivalent to `python3 -m tmux_worktree_sessions`:
 
 ```sh
 tws sessions manage      # run the picker outside a TPM-managed tmux
+tws sessions previous    # switch to the previous live session by attach time
 tws --help
 ```
 

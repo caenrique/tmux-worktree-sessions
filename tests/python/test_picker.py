@@ -8,11 +8,13 @@ binary on PATH.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from tmux_worktree_sessions import pull_requests
+from tmux_worktree_sessions import picker as picker_module
+from tmux_worktree_sessions import pull_requests, session_tree, tmux
 from tmux_worktree_sessions.__main__ import main
 from tmux_worktree_sessions.icons import IconSet
 from tmux_worktree_sessions.picker import (
@@ -23,12 +25,96 @@ from tmux_worktree_sessions.picker import (
 )
 from tmux_worktree_sessions.pull_requests import PullRequest
 
-from .conftest import FzfStub, GhStub, TmuxStub
+from .conftest import CurlStub, FzfStub, GhStub, TmuxStub
 
 
 def test_iconset_sep_is_space_when_icons_present() -> None:
     icons = IconSet.from_style("ascii")
     assert icons.sep == " "
+
+
+def test_async_agent_refresh_updates_snapshot_and_requests_reload(
+    monkeypatch: pytest.MonkeyPatch,
+    curl_stub: CurlStub,
+    tmp_path: Path,
+) -> None:
+    rootfile = tmp_path / "roots"
+    viewfile = tmp_path / "view"
+    statefile = tmp_path / "state"
+    rootfile.write_text("s\t3\trepo\t* repo\n")
+    session_tree.save_state(statefile, session_tree.TreeState())
+    agent = tmux.Agent(
+        "Codex",
+        "3",
+        "@1",
+        1,
+        "%2",
+        2,
+        Path("/repo"),
+        "idle",
+        "editing",
+    )
+    monkeypatch.setattr(picker_module.tmux, "list_agents", lambda: [agent])
+
+    picker_module._refresh_agents_async(
+        rootfile=rootfile,
+        viewfile=viewfile,
+        statefile=statefile,
+        listen_port=54321,
+        stop=threading.Event(),
+    )
+
+    assert session_tree.load_agents(statefile) == [agent]
+    assert "Codex idle" in viewfile.read_text()
+    assert "localhost:54321" in curl_stub.text()
+    assert "reload(cat" in curl_stub.text()
+
+
+def test_working_agent_spinner_rotates_until_picker_stops(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    rootfile = tmp_path / "roots"
+    viewfile = tmp_path / "view"
+    statefile = tmp_path / "state"
+    rootfile.write_text("s\t3\trepo\t* repo\n")
+    session_tree.save_state(statefile, session_tree.TreeState())
+    agent = tmux.Agent(
+        "Codex",
+        "3",
+        "@1",
+        1,
+        "%2",
+        2,
+        Path("/repo"),
+        "working",
+        "editing",
+    )
+    stop = threading.Event()
+    posts: list[str] = []
+
+    monkeypatch.setattr(picker_module.tmux, "list_agents", lambda: [agent])
+    monkeypatch.setattr(picker_module, "_AGENT_RELOAD_INITIAL_DELAY_S", 0.0)
+    monkeypatch.setattr(picker_module, "_AGENT_SPINNER_INTERVAL_S", 0.0)
+
+    def record_post(_port: int, body: str, *, max_time: float) -> None:
+        del max_time
+        posts.append(body)
+        if len(posts) == 2:
+            stop.set()
+
+    monkeypatch.setattr(picker_module.curl, "post", record_post)
+
+    picker_module._refresh_agents_async(
+        rootfile=rootfile,
+        viewfile=viewfile,
+        statefile=statefile,
+        listen_port=54321,
+        stop=stop,
+    )
+
+    assert len(posts) == 2
+    assert "\x1b[32m⠙\x1b[0m Codex working" in viewfile.read_text()
 
 
 def test_iconset_sep_is_empty_in_none_style() -> None:
