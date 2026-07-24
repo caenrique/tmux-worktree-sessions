@@ -19,7 +19,9 @@ Style tuples:
 
 from __future__ import annotations
 
+import os
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import IO
 
@@ -101,6 +103,7 @@ def run(
     *args: str,
     input: str | None = None,
     stdin: IO[bytes] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> FzfResult:
     """Invoke ``fzf`` with ``args``; return the captured result.
 
@@ -121,6 +124,7 @@ def run(
         stdin=stdin,
         capture_output=True,
         text=True,
+        env=env,
     )
     return FzfResult(returncode=result.returncode, stdout=result.stdout)
 
@@ -227,6 +231,7 @@ class Picker:
     preview: str | None = None
     preview_window: str | None = None
     extra_flags: tuple[str, ...] = ()
+    force_color: bool = False
 
     def bind(self, expression: str) -> Picker:
         """Append ``expression`` to ``--bind`` and return ``self``.
@@ -272,7 +277,11 @@ class Picker:
         :class:`PickerSelection` with the pressed expect-key (empty for
         Enter) and the raw selected line.
         """
-        result = run(*self._argv(), stdin=stdin)
+        env = None
+        if self.force_color:
+            env = os.environ.copy()
+            env.pop("NO_COLOR", None)
+        result = run(*self._argv(), stdin=stdin, env=env)
         if result.cancelled or not result.stdout:
             return PickerSelection(key="", line="", cancelled=True)
         out_lines = result.stdout.split("\n")

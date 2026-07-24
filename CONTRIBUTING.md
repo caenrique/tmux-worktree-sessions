@@ -88,7 +88,7 @@ A few project-specific rules worth calling out — the rest is whatever
   ambient env reads.
 - The `_internal` argparse subcommand is hidden from `--help` and is
   only ever invoked by fzf binds the picker spawns into itself. The
-  user-facing CLI surface is `sessions manage`,
+  user-facing CLI surface is `sessions manage`, `sessions previous`,
   `sessions display-name`, and `worktree manage`.
 
 ## Recency ranking
@@ -100,6 +100,11 @@ touching `score.py`, `sessions.py`, or anything that emits picker rows.
 timestamp. The current session is pinned first, the previous second,
 and the rest follow newest→oldest. `Enter` updates `session_last_attached`
 naturally, so no extra bookkeeping is needed for this tier.
+
+The `sessions previous` shortcut also uses `session_last_attached`, but
+only considers live sessions other than the current one. This intentionally
+does not use `client_last_session`: deleting tmux's remembered last session
+must still fall back to the next live session in attach order.
 
 **Projects** are ranked by an exponential-decay score persisted to
 `@tws-scores-file` (default `$HOME/.local/share/tws/scores.tsv`). Each

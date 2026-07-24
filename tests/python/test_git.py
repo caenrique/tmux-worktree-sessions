@@ -7,6 +7,7 @@ real git repos via the ``make_repo`` fixture in ``conftest.py``.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -283,6 +284,22 @@ def test_list_worktrees_marks_detached_head(
     assert "(detached)" in branches
 
 
+def test_list_worktrees_marks_prunable(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
+    # A worktree whose directory is deleted out from under git is
+    # reported as prunable by ``git worktree list --porcelain``.
+    repo = make_repo("r")
+    stray = tmp_path / "gone"
+    worktree_add(repo, stray, "gone", new_branch=True)
+    shutil.rmtree(stray)
+    worktrees = list_worktrees(repo)
+    assert worktrees[0].prunable is False  # the main checkout
+    assert {wt.branch: wt.prunable for wt in worktrees}["gone"] is True
+
+
 def test_rename_worktree_renames_branch_moves_dir_and_repairs(
     make_repo: Callable[..., Path],
     worktree_add: Callable[..., None],
@@ -522,6 +539,40 @@ def test_detect_layout_mixed_paths_is_ambiguous(
     worktree_add(repo, repo / ".worktrees" / "inside", "inside", new_branch=True)
     worktree_add(repo, tmp_path / "outside", "outside", new_branch=True)
     assert detect_layout(repo, worktrees_dir=".worktrees") == "ambiguous"
+
+
+def test_detect_layout_ignores_prunable_stray(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
+    # Real-world shape: main plus a sibling worktree, with one stale
+    # worktree left at an unrelated path (its checkout deleted, so git
+    # reports it prunable). The prunable stray must not drag the verdict
+    # to ambiguous — the live siblings still describe the layout.
+    container = tmp_path / "r-container"
+    container.mkdir()
+    repo = make_repo("r-container/main")
+    worktree_add(repo, container / "feature", "feature", new_branch=True)
+    stray = tmp_path / "elsewhere" / "stale"
+    worktree_add(repo, stray, "stale", new_branch=True)
+    shutil.rmtree(stray)
+    assert detect_layout(repo, worktrees_dir=".worktrees") == "sibling"
+
+
+def test_detect_layout_subfolder_with_prunable_stray(
+    make_repo: Callable[..., Path],
+    worktree_add: Callable[..., None],
+    tmp_path: Path,
+) -> None:
+    # Same guard for the subfolder layout: a prunable stray alongside a
+    # live ``.worktrees/`` worktree still resolves to subfolder.
+    repo = make_repo("r")
+    worktree_add(repo, repo / ".worktrees" / "feature", "feature", new_branch=True)
+    stray = tmp_path / "elsewhere" / "stale"
+    worktree_add(repo, stray, "stale", new_branch=True)
+    shutil.rmtree(stray)
+    assert detect_layout(repo, worktrees_dir=".worktrees") == "subfolder"
 
 
 def test_worktree_container_sibling_returns_main_parent(tmp_path: Path) -> None:

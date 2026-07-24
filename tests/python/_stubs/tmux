@@ -4,8 +4,11 @@
 #
 #   TMUX_STUB_SESSIONS  — newline-sep TSV rows: name<TAB>id<TAB>path
 #   TMUX_STUB_CURRENT   — `display-message -p '#{session_name}'`
+#   TMUX_STUB_CURRENT_ID — `display-message -p '#{session_id}'`
 #   TMUX_STUB_PREV      — `display-message -p '#{client_last_session}'`
 #   TMUX_STUB_PANE_PATH — `display-message -p '#{pane_current_path}'`
+#   TMUX_STUB_PANES     — newline-sep rows returned by `list-panes`
+#   TMUX_STUB_AGENTS    — newline-sep rows returned by `list-panes -a`
 #   TMUX_STUB_NEW_ID    — id printed by `new-session ... -P -F '#{session_id}'`
 #   TMUX_STUB_OPTIONS   — newline-sep `key=value` for `show-option -gqv key`
 
@@ -56,13 +59,25 @@ case "$cmd" in
       esac
     done
     case "$fmt" in
-      "#{session_name}")        printf '%s' "${TMUX_STUB_CURRENT:-}" ;;
+      "#{session_name}")
+        if [[ -n "$target" && -n "${TMUX_STUB_SESSIONS:-}" ]]; then
+          while IFS=$'\t' read -r session_name id _; do
+            if [[ "$id" == "$target" ]]; then
+              printf '%s' "$session_name"
+              break
+            fi
+          done <<<"$TMUX_STUB_SESSIONS"
+        else
+          printf '%s' "${TMUX_STUB_CURRENT:-}"
+        fi
+        ;;
+      "#{session_id}")          printf '%s' "${TMUX_STUB_CURRENT_ID:-}" ;;
       "#{client_last_session}") printf '%s' "${TMUX_STUB_PREV:-}" ;;
       "#{pane_current_path}")   printf '%s' "${TMUX_STUB_PANE_PATH:-}" ;;
       "#{session_path}")
         # Lookup by target session id (e.g. "$1")
         if [[ -n "$target" && -n "${TMUX_STUB_SESSIONS:-}" ]]; then
-          while IFS=$'\t' read -r _ id p; do
+          while IFS=$'\t' read -r _ id p _last_attached; do
             if [[ "$id" == "$target" ]]; then
               printf '%s' "$p"
               break
@@ -84,7 +99,19 @@ case "$cmd" in
     printf '%s' "$id"
     ;;
 
-  switch-client|kill-session|rename-session|bind-key|capture-pane|source)
+  list-panes)
+    if [[ "${2:-}" == "-a" ]]; then
+      printf '%s' "${TMUX_STUB_AGENTS:-}"
+    else
+      printf '%s' "${TMUX_STUB_PANES:-}"
+    fi
+    ;;
+
+  capture-pane)
+    printf '%s' "${TMUX_STUB_CAPTURE:-}"
+    ;;
+
+  switch-client|select-window|select-pane|kill-session|kill-window|kill-pane|rename-session|bind-key|source|refresh-client)
     # Pure side-effect: log only (already logged at top).
     :
     ;;

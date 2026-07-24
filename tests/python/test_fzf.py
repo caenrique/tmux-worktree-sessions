@@ -9,6 +9,7 @@ responses.
 from __future__ import annotations
 
 import io
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -197,6 +198,25 @@ def test_picker_argv_omits_listen_by_default(fzf_stub: FzfStub, tmp_path: Path) 
     with payload.open("rb") as f:
         p.run(stdin=f)
     assert "--listen" not in fzf_stub.invocations()[-1]
+
+
+def test_picker_force_color_removes_no_color_from_child_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_env: dict[str, str] = {}
+
+    def fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        env = kwargs["env"]
+        assert isinstance(env, dict)
+        seen_env.update(env)
+        return subprocess.CompletedProcess([], 130, "")
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(fzf.subprocess, "run", fake_run)
+
+    fzf.Picker(prompt_label="Pick > ", header="ok", force_color=True).run(stdin=io.BytesIO())
+
+    assert "NO_COLOR" not in seen_env
 
 
 def test_picker_bind_chains_appends_to_argv(fzf_stub: FzfStub, tmp_path: Path) -> None:

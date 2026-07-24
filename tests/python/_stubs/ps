@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+printf '%s' "${PS_STUB_PROCESSES:-}"
