@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import fzf, git, score, sessions, text, tmux
+from . import fzf, git, pull_requests, score, sessions, text, tmux
 from .icons import IconSet
 
 if TYPE_CHECKING:
@@ -52,6 +52,7 @@ BOLD = "\033[1m"
 RESET = "\033[0m"
 
 _BRANCH_HEADER = "enter:checkout  ctrl-bs:back  ctrl-f:refresh  ctrl-x:delete-worktree"
+_PR_FILTER_HINT = "  ctrl-p:pull-requests"
 _NEW_NAME_HEADER = "enter:create  ctrl-bs:back"
 _SESSION_HEADER = "enter:open ctrl-bs:back ?:preview ctrl-x:delete-session ctrl-r:rename ctrl-w:worktree"
 _RENAME_HEADER = "enter:rename  ctrl-bs:cancel"
@@ -90,8 +91,8 @@ class BranchChoice:
     """Outcome of :func:`pick_branch`.
 
     ``kind`` is one of ``"new"``, ``"existing"``, ``"back"``, or
-    ``"cancel"``. ``name`` carries the branch name for the first two
-    kinds; it is empty for ``back`` / ``cancel``.
+    ``"cancel"``. ``name`` carries the branch name for checkout kinds;
+    it is empty for ``back`` / ``cancel``.
     """
 
     kind: str
@@ -147,6 +148,7 @@ def gen_branch_picker_entries(
     home: str = "",
     strip_prefixes: list[str] | None = None,
     session_paths: frozenset[Path] = frozenset(),
+    open_pull_requests: dict[str, pull_requests.PullRequest] | None = None,
 ) -> Iterator[str]:
     """Yield TSV lines for the branch picker.
 
@@ -165,10 +167,12 @@ def gen_branch_picker_entries(
     Branches with a worktree get the worktree path appended in dark
     gray, formatted via :func:`text.format_session_name`. Within each
     group, ``git.list_branches`` order is preserved (alphabetical for
-    locals, sorted for remotes). The picker must be invoked with
-    ``--ansi`` for the SGR codes to render.
+    locals, sorted for remotes). Open pull-request branches use the PR
+    icon and append title, author, and age in gray. The picker must be
+    invoked with ``--ansi`` for the SGR codes to render.
     """
     prefixes = strip_prefixes or []
+    prs = open_pull_requests or {}
     remote = git.resolve_remote(repo)
     yield f"[new]\t{icons.new}{icons.sep}new branch"
 
@@ -189,6 +193,7 @@ def gen_branch_picker_entries(
             icons=icons,
             home=home,
             prefixes=prefixes,
+            pull_request=prs.get(branch[len(remote) + 1 :] if remote and branch.startswith(f"{remote}/") else branch),
         )
         if has_session:
             sessions_bucket.append(line)
@@ -214,10 +219,11 @@ def _format_branch_row(
     icons: IconSet,
     home: str,
     prefixes: list[str],
+    pull_request: pull_requests.PullRequest | None,
 ) -> tuple[str, bool, bool, bool]:
     """Format one branch row plus the booleans that pick its bucket."""
     is_remote = remote_prefix is not None and branch.startswith(remote_prefix)
-    icon = icons.remote if is_remote else icons.branch
+    icon = icons.pull_request if pull_request is not None else (icons.remote if is_remote else icons.branch)
     wt_path = branch_paths.get(branch)
     has_session = wt_path is not None and wt_path in session_paths
     has_worktree = wt_path is not None and not has_session
@@ -233,7 +239,11 @@ def _format_branch_row(
     if wt_path is not None:
         display_path = text.format_session_name(str(wt_path), home=home, strip_prefixes=prefixes)
         suffix = f" {GRAY}{display_path}{RESET}"
-    line = f"{branch}\t{label_open}{icon}{icons.sep}{branch}{label_close}{suffix}"
+    if pull_request is not None:
+        author = f"@{pull_request.author}" if pull_request.author else "unknown author"
+        suffix += f" {GRAY}{pull_request.title} · {author} · {pull_request.days_open}d{RESET}"
+    marker = "\tpr" if pull_request is not None else ""
+    line = f"{branch}\t{label_open}{icon}{icons.sep}{branch}{label_close}{suffix}{marker}"
     return line, has_session, has_worktree, is_remote
 
 
@@ -260,6 +270,7 @@ def _seed_branch_tmpfile(
     home: str,
     strip_prefixes: list[str] | None,
     session_paths: frozenset[Path],
+    open_pull_requests: dict[str, pull_requests.PullRequest],
 ) -> Path:
     """Write the initial branch-picker entries to a fresh tempfile.
 
@@ -275,19 +286,38 @@ def _seed_branch_tmpfile(
             home=home,
             strip_prefixes=strip_prefixes,
             session_paths=session_paths,
+            open_pull_requests=open_pull_requests,
         ):
             initial.write(line + "\n")
     return path
+
+
+def _branch_header(*, pr_enabled: bool, pr_only: bool = False) -> str:
+    """Return the branch-picker header for the available feature set."""
+    header = _BRANCH_HEADER + (_PR_FILTER_HINT if pr_enabled else "")
+    return f"{header} [pull requests only]" if pr_only else header
+
+
+def _branch_reload_command(tmpfile: Path, statefile: Path) -> str:
+    """Shell command that emits the active all/PR-only view."""
+    quoted_tmpfile = shlex.quote(str(tmpfile))
+    quoted_statefile = shlex.quote(str(statefile))
+    return (
+        f"if grep -qx pr {quoted_statefile}; then "
+        f"awk -F '\\t' '$3 == \"pr\"' {quoted_tmpfile}; else cat {quoted_tmpfile}; fi"
+    )
 
 
 def _maybe_start_background_fetch(
     repo: Path,
     *,
     tmpfile: Path,
+    statefile: Path,
     listen_port: int,
     fetch_argv: list[str],
     now: float,
     fetch_window_secs: int,
+    header_base: str,
 ) -> tuple[subprocess.Popen[bytes] | None, str]:
     """Spawn the detached fetch helper if FETCH_HEAD is older than the window.
 
@@ -297,25 +327,28 @@ def _maybe_start_background_fetch(
     """
     mtime = git.fetch_head_mtime(repo)
     if not git.fetch_is_stale(mtime, now=now, window_secs=fetch_window_secs):
-        return None, _BRANCH_HEADER
+        return None, header_base
     proc = subprocess.Popen(
         [
             *fetch_argv,
             str(repo),
             str(tmpfile),
+            str(statefile),
             str(listen_port),
-            _BRANCH_HEADER,
+            header_base,
         ],
         start_new_session=True,
     )
-    return proc, f"{_BRANCH_HEADER} [syncing...]"
+    return proc, f"{header_base} [syncing...]"
 
 
 def _build_ctrl_f_bind(
     fetch_argv: list[str],
     repo: Path,
     tmpfile: Path,
+    statefile: Path,
     listen_port: int,
+    header_base: str,
 ) -> str:
     """Compose the ``ctrl-f`` bind that re-runs fetch-reload on demand."""
     args = " ".join(
@@ -324,14 +357,15 @@ def _build_ctrl_f_bind(
             *fetch_argv,
             str(repo),
             str(tmpfile),
+            str(statefile),
             str(listen_port),
-            _BRANCH_HEADER,
+            header_base,
         )
     )
-    return f"ctrl-f:change-header({_BRANCH_HEADER} ⟳ fetching...)+execute-silent({args})"
+    return f"ctrl-f:change-header({header_base} ⟳ fetching...)+execute-silent({args})"
 
 
-def _build_branch_ctrl_x_bind(repo: Path, tmpfile: Path) -> str:
+def _build_branch_ctrl_x_bind(repo: Path, tmpfile: Path, statefile: Path) -> str:
     """Compose the ``ctrl-x`` bind that removes the selected branch's worktree.
 
     Shells out to ``_internal branch-action ctrl-x <repo> <branch> <tmpfile>``
@@ -343,7 +377,8 @@ def _build_branch_ctrl_x_bind(repo: Path, tmpfile: Path) -> str:
         f"{shlex.quote(sys.executable)} -m tmux_worktree_sessions _internal branch-action ctrl-x "
         f"{shlex.quote(str(repo))} {{1}} {shlex.quote(str(tmpfile))}"
     )
-    return f"ctrl-x:execute-silent({action_cmd})+reload(cat {shlex.quote(str(tmpfile))})+pos({{n}})"
+    reload_cmd = _branch_reload_command(tmpfile, statefile)
+    return f"ctrl-x:execute-silent({action_cmd})+reload({reload_cmd})+pos({{n}})"
 
 
 def _branch_pick_round(
@@ -353,6 +388,8 @@ def _branch_pick_round(
     listen_port: int,
     ctrl_f_bind: str,
     ctrl_x_bind: str,
+    pr_enabled: bool,
+    pr_only: bool,
 ) -> fzf.PickerSelection:
     """Run one fzf round of the branch picker reading from ``tmpfile``."""
     branch_picker = (
@@ -360,14 +397,22 @@ def _branch_pick_round(
             prompt_label="Branch > ",
             header=initial_header,
             with_nth="2",
-            expect="ctrl-bs",
+            expect="ctrl-bs,ctrl-p" if pr_enabled else "ctrl-bs",
             listen_port=listen_port,
         )
         .bind(ctrl_f_bind)
         .bind(ctrl_x_bind)
     )
-    with tmpfile.open("rb") as input_f:
-        return branch_picker.run(stdin=input_f)
+    if not pr_only:
+        with tmpfile.open("rb") as input_f:
+            return branch_picker.run(stdin=input_f)
+
+    with tempfile.TemporaryFile() as filtered:
+        for line in tmpfile.read_bytes().splitlines(keepends=True):
+            if line.rstrip(b"\r\n").endswith(b"\tpr"):
+                filtered.write(line)
+        filtered.seek(0)
+        return branch_picker.run(stdin=filtered)
 
 
 def _prompt_new_branch_name() -> BranchChoice | None:
@@ -413,23 +458,33 @@ def pick_branch(
     fetch helper invoked via ``fetch_reload_argv`` can rewrite them in
     place and post a ``reload`` to fzf's listen port.
     """
+    pr_enabled = pull_requests.is_available()
+    prs = pull_requests.list_open(repo, now=now) if pr_enabled else {}
     tmpfile = _seed_branch_tmpfile(
         repo,
         icons=icons,
         home=home,
         strip_prefixes=strip_prefixes,
         session_paths=session_paths,
+        open_pull_requests=prs,
     )
+    with tempfile.NamedTemporaryFile("w", delete=False) as state:
+        state.write("all")
+        statefile = Path(state.name)
+    header_base = _branch_header(pr_enabled=pr_enabled)
     fetch_proc, initial_header = _maybe_start_background_fetch(
         repo,
         tmpfile=tmpfile,
+        statefile=statefile,
         listen_port=listen_port,
         fetch_argv=fetch_reload_argv,
         now=now,
         fetch_window_secs=fetch_window_secs,
+        header_base=header_base,
     )
-    ctrl_f_bind = _build_ctrl_f_bind(fetch_reload_argv, repo, tmpfile, listen_port)
-    ctrl_x_bind = _build_branch_ctrl_x_bind(repo, tmpfile)
+    ctrl_f_bind = _build_ctrl_f_bind(fetch_reload_argv, repo, tmpfile, statefile, listen_port, header_base)
+    ctrl_x_bind = _build_branch_ctrl_x_bind(repo, tmpfile, statefile)
+    pr_only = False
 
     try:
         while True:
@@ -439,13 +494,20 @@ def pick_branch(
                 listen_port=listen_port,
                 ctrl_f_bind=ctrl_f_bind,
                 ctrl_x_bind=ctrl_x_bind,
+                pr_enabled=pr_enabled,
+                pr_only=pr_only,
             )
-            initial_header = _BRANCH_HEADER
+            initial_header = _branch_header(pr_enabled=pr_enabled, pr_only=pr_only)
 
             if selection.cancelled:
                 return BranchChoice(kind="cancel")
             if selection.key == "ctrl-bs":
                 return BranchChoice(kind="back")
+            if selection.key == "ctrl-p":
+                pr_only = not pr_only
+                statefile.write_text("pr" if pr_only else "all")
+                initial_header = _branch_header(pr_enabled=True, pr_only=pr_only)
+                continue
             item = selection.line.split("\t", 1)[0] if selection.line else ""
             if not item:
                 return BranchChoice(kind="cancel")
@@ -460,6 +522,8 @@ def pick_branch(
     finally:
         with contextlib.suppress(FileNotFoundError):
             tmpfile.unlink()
+        with contextlib.suppress(FileNotFoundError):
+            statefile.unlink()
         if fetch_proc is not None and fetch_proc.poll() is None:
             with contextlib.suppress(OSError):
                 fetch_proc.terminate()
@@ -879,6 +943,7 @@ def branch_action_ctrl_x(
             home=home,
             strip_prefixes=strip_prefixes,
             session_paths=frozenset(p for p in sessions_by_path if p != wt_path),
+            open_pull_requests=(pull_requests.list_open(repo, now=time.time()) if pull_requests.is_available() else {}),
         )
     )
     tmpfile.write_text("\n".join(rebuilt) + ("\n" if rebuilt else ""))

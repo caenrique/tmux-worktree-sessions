@@ -23,6 +23,7 @@ Selecting an entry switches to the session (or creates one if the project isn't 
 - [fzf](https://github.com/junegunn/fzf) — picker UI, also used as `--listen` server for the live branch-list reload
 - [fd](https://github.com/sharkdp/fd) — fast project discovery under `@tws-projects-dir`
 - [curl](https://curl.se) — talks to fzf's `--listen` HTTP port to drive the fetch-and-reload animation in the branch picker
+- [GitHub CLI (`gh`)](https://cli.github.com) *(optional)* — enables open pull-request filtering and review metadata in the branch picker
 
 ## 📦 Installation
 
@@ -117,10 +118,13 @@ Opened by pressing `Ctrl-W` in the session picker, or directly with `Ctrl+Shift+
 | `Enter` | Checkout the selected branch in a new worktree (or switch if already checked out) |
 | `Ctrl-X` | Delete the selected branch's worktree; kills its tmux session first if one is open. Flashes a message when the row has no worktree, is the main worktree, or is the `[new]` sentinel. Branches themselves are never deleted |
 | `Ctrl-F` | Fetch all remotes and reload the branch list. Fetching also happens automatically when the last fetch is more than 15 minutes old |
+| `Ctrl-P` | Toggle between all branches and branches with an open pull request (available only when `gh` is installed) |
 | `Ctrl-Backspace` | Go back to the session picker |
 | `Esc` | Close everything |
 
 Selecting the `[new]` entry at the top of the list lets you type a new branch name, which is created from the repo's default remote branch.
+
+When `gh` is installed, open pull-request branches use a distinct icon and show the PR title, author, and age in gray after the branch name. Checking one out uses the branch's normal local name and follows the repository's existing worktree layout.
 
 ## 🌳 Worktree layouts
 

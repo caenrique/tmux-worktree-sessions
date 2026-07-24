@@ -27,10 +27,13 @@ def test_fetch_reload_posts_final_reload(
     repo = make_repo("r", with_remote=True)
     tmpfile = tmp_path / "branch-entries"
     tmpfile.write_text("")
+    statefile = tmp_path / "branch-view"
+    statefile.write_text("all")
 
     fetch_and_reload(
         repo,
         tmpfile,
+        statefile,
         12345,
         "header-base",
         icons=IconSet.from_style("ascii"),
@@ -38,7 +41,7 @@ def test_fetch_reload_posts_final_reload(
 
     log = curl_stub.text()
     assert "localhost:12345" in log
-    assert "reload(cat" in log
+    assert "reload(" in log
     assert "header-base" in log
 
 
@@ -50,10 +53,13 @@ def test_fetch_reload_regenerates_entries_with_new_sentinel(
     repo = make_repo("r", branches=("main", "feature"), with_remote=True)
     tmpfile = tmp_path / "branch-entries"
     tmpfile.write_text("")
+    statefile = tmp_path / "branch-view"
+    statefile.write_text("all")
 
     fetch_and_reload(
         repo,
         tmpfile,
+        statefile,
         12346,
         "h",
         icons=IconSet.from_style("ascii"),
@@ -72,16 +78,44 @@ def test_fetch_reload_uses_supplied_port(
     repo = make_repo("r", with_remote=True)
     tmpfile = tmp_path / "branch-entries"
     tmpfile.write_text("")
+    statefile = tmp_path / "branch-view"
+    statefile.write_text("all")
 
     fetch_and_reload(
         repo,
         tmpfile,
+        statefile,
         59999,
         "h",
         icons=IconSet.from_style("ascii"),
     )
 
     assert "localhost:59999" in curl_stub.text()
+
+
+def test_fetch_reload_preserves_pull_request_only_view(
+    make_repo: Callable[..., Path],
+    curl_stub: CurlStub,
+    tmp_path: Path,
+) -> None:
+    repo = make_repo("r", with_remote=True)
+    tmpfile = tmp_path / "branch-entries"
+    tmpfile.write_text("")
+    statefile = tmp_path / "branch-view"
+    statefile.write_text("pr")
+
+    fetch_and_reload(
+        repo,
+        tmpfile,
+        statefile,
+        12347,
+        "h",
+        icons=IconSet.from_style("ascii"),
+    )
+
+    payload = curl_stub.text()
+    assert "awk -F" in payload
+    assert "[pull requests only]" in payload
 
 
 def test_fetch_reload_still_posts_when_fetch_fails(
@@ -100,13 +134,16 @@ def test_fetch_reload_still_posts_when_fetch_fails(
     )
     tmpfile = tmp_path / "branch-entries"
     tmpfile.write_text("")
+    statefile = tmp_path / "branch-view"
+    statefile.write_text("all")
 
     fetch_and_reload(
         repo,
         tmpfile,
+        statefile,
         12348,
         "h",
         icons=IconSet.from_style("ascii"),
     )
 
-    assert "reload(cat" in curl_stub.text()
+    assert "reload(" in curl_stub.text()
